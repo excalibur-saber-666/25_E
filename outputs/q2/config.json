@@ -1,0 +1,21 @@
+{
+  "random_seed": 2025,
+  "feature_file": "outputs\\q1\\features_source_diagnostic.csv",
+  "n_features": 26,
+  "file_level_features": 52,
+  "window": 16384,
+  "hop": 8192,
+  "split_methods": {
+    "primary": "nested LOLO",
+    "auxiliary": "nested StratifiedGroupKFold(4)",
+    "inner": "StratifiedGroupKFold(3)"
+  },
+  "models": [
+    "logistic_regression",
+    "rbf_svm",
+    "random_forest",
+    "mlp"
+  ],
+  "class_balance": "MLP window sampling weight = 1/(4 * files_in_class * windows_in_file); sklearn class_weight=balanced",
+  "selected_metric": "LOLO Macro-F1"
+}

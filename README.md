@@ -18,4 +18,12 @@ python .\src\q1_pipeline.py
 - [实施评审与科学边界](项目说明/评审结论与实施说明.md)
 - [详细使用说明](项目说明/README.md)
 
+第二问源域故障诊断可运行：
+
+```powershell
+python .\src\q2_pipeline.py
+```
+
+结果位于 `outputs/q2/`；其中的源域 LOLO/Group CV 指标不代表 A–P 目标域准确率。
+
 关键约束：所有训练/验证必须按原始 `.mat` 文件分组；重叠窗口不是独立样本；没有目标真值和目标轴承几何时，不报告目标准确率或强行标注 BPFO/BPFI/BSF。

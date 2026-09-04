@@ -65,3 +65,16 @@ package. Do not use source-only, CORAL or DANN candidate labels as A–P truth.
 
 The complete current evidence, limitations and questions for external review
 are in `当前运行结果与待反馈问题.md`.
+
+## Question 2 source-domain diagnosis
+
+Run the nested file-level diagnostic benchmark with:
+
+```powershell
+python .\src\q2_pipeline.py
+```
+
+It reads only `outputs\q1\features_source_diagnostic.csv`, writes results to
+`outputs\q2\`, and saves an MLP encoder/scaler/schema interface for Question 3.
+All reported metrics are source-domain, file-level metrics; no target A–P label
+or target-domain accuracy is used.
