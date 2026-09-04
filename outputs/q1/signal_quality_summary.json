@@ -1,0 +1,10 @@
+{
+  "files_scanned": 177,
+  "hard_failures": 0,
+  "review_candidates": 8,
+  "status_counts": {
+    "ok": 169,
+    "distribution_review": 8
+  },
+  "interpretation": "Amplitude differences are retained as physical recordings unless a hard signal-integrity failure is present. No automatic filtering or deletion is performed by this audit."
+}

@@ -40,7 +40,8 @@ Results are written to `outputs\q1\`. The key files are:
 - `figures\`: publication-ready mechanism and feature-quality figures;
 - `q1_summary.md`: compact machine-generated run summary.
 
-For the latest executed run, see `当前运行结果与待反馈问题.md` in this directory.
+For the latest executed run and the LOLO/ablation/window-validation conclusion,
+see `当前运行结果与待反馈问题.md` and `第一问封版验证结果.md` in this directory.
 
 ## Older diagnostic baselines (not Question 1 conclusions)
 

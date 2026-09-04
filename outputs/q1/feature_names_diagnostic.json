@@ -1,5 +1,5 @@
 {
-  "selected_features": [
+  "features": [
     "amp_rms",
     "amp_peak",
     "shape_skew",
@@ -14,7 +14,6 @@
     "env_kurtosis",
     "env_entropy",
     "env_peak_ratio",
-    "acf_first_peak_s",
     "psd_0_500",
     "env_0_500",
     "psd_500_1000",
@@ -23,12 +22,15 @@
     "env_1000_2000",
     "env_2000_4000",
     "psd_4000_8000",
-    "order_dominant",
     "order_0.5_2",
     "order_2_4",
     "order_4_8",
     "order_8_16"
   ],
-  "n_features": 28,
-  "rule": "Descriptive low-variance removal and greedy |Pearson r| > 0.95 removal; MI is descriptive only. LOLO uses pre-specified sets."
+  "n_features": 26,
+  "purpose": "Question 2 source-domain diagnosis",
+  "excluded_suspects": [
+    "acf_first_peak_s",
+    "order_dominant"
+  ]
 }
