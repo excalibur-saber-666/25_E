@@ -1,0 +1,11 @@
+{
+  "mat_files": 177,
+  "errors": [],
+  "branch_counts": {
+    "12k_DE": 60,
+    "12k_FE": 45,
+    "48k_DE": 52,
+    "48k_normal": 4,
+    "target_32k": 16
+  }
+}

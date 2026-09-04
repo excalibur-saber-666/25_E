@@ -1,6 +1,5 @@
-# Temporary artifacts created during local analysis
-tmp/
+# Local rendering configuration
+.nature-figure.json
 
-# Python cache files
-__pycache__/
-*.py[cod]
+# Lossless TIFF exports are retained locally but can exceed GitHub's 100 MB file limit.
+outputs/**/figures/*.tiff

@@ -1,0 +1,5 @@
+﻿candidate_domain,sample_rate_common,common_band_hz,mmd,proxy_a_distance,n_files,notes
+12k_DE,12000,0-6000,0.5703828508195254,2.0,60,"Auxiliary distance only; DE location, bandwidth and label coverage also govern selection."
+12k_FE,12000,0-6000,0.44344315273558776,2.0,45,"Auxiliary distance only; DE location, bandwidth and label coverage also govern selection."
+48k_DE,12000,0-6000,0.6387353503518144,2.0,52,"Auxiliary distance only; DE location, bandwidth and label coverage also govern selection."
+48k_DE_plus_normal,12000,0-6000,0.5437249391233879,2.0,56,"Auxiliary distance only; DE location, bandwidth and label coverage also govern selection."
