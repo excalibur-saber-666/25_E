@@ -1,0 +1,6 @@
+# Temporary artifacts created during local analysis
+tmp/
+
+# Python cache files
+__pycache__/
+*.py[cod]
