@@ -1,0 +1,57 @@
+{
+  "seeds": [
+    2025,
+    2026,
+    2027,
+    2028,
+    2029
+  ],
+  "hashes": {
+    "outputs\\q1\\features_source_diagnostic.csv": "1409cb7b5141fac98a03b6b433c222488386104f53a5780bb4a5531e0b372643",
+    "outputs\\q1\\features_source_transfer.csv": "fd7a866bb4ea7e4192e051bafdadc6f7118da29205de8a3ec6d5a03b0f4365aa",
+    "outputs\\q1\\feature_names_diagnostic.json": "74b4b8ac6835f92733bf7a2769d3bd223013263db3c78fee353afc44bf36d0e6",
+    "outputs\\q1\\feature_names_transfer.json": "365da355cf881733df6ff379da9a8465dae08abf099711e7eec703b6ff546fb0",
+    "outputs\\q1\\source_metadata.csv": "f9b17e1db6140d1bf199830e5bdc4b9f70c06fd2c44c716def9eb19b4794695a",
+    "C:\\Users\\saber\\Desktop\\2025_E\\src\\q2_robustness.py": "128b0f801d80354b953063a1b71a339994034dc046ebdc3b7c6e923d6f5e4f7c",
+    "C:\\Users\\saber\\Desktop\\2025_E\\src\\q2_pipeline.py": "57fff14aa8c96753eee97a1f5763d854e059ad015fb480e639da5410525b835a"
+  },
+  "fingerprint": "b5da74e8cac64964b2ac5860b5249ce42588d4bd4995c0c0886773ddf3561de6",
+  "target_data_used": false,
+  "backend": "python",
+  "bootstrap_repetitions": 2000,
+  "ece_bins": 10,
+  "torch_threads": 1,
+  "python": "3.13.7",
+  "numpy": "2.3.3",
+  "sklearn": "1.7.2",
+  "torch": "2.12.0+cpu",
+  "mlp_candidates": [
+    {
+      "dropout": 0.1,
+      "weight_decay": 0.0001
+    },
+    {
+      "dropout": 0.2,
+      "weight_decay": 0.001
+    }
+  ],
+  "max_epochs": 100,
+  "patience": 15,
+  "random_state": "seed + 100 * (load+1)",
+  "inner_split": "StratifiedKFold on unique MAT file rows; 3 folds, 2 for calibration sub-inner N=2",
+  "sklearn_selection": "Macro-F1 of argmax aligned predict_proba, consistent with final evaluation",
+  "sampler": "1/(4 * files_in_class * windows_in_file)",
+  "window": 16384,
+  "hop": 8192,
+  "calibration": "softmax(log(mean_window_softmax)/T), T fitted on nested cross-fitted outer-training files",
+  "bootstrap_scope": "class-stratified paired file resampling; predictions fixed; seed estimates averaged, not stacked",
+  "feature_groups": {
+    "Diagnostic26": "26 fixed diagnostic features",
+    "Transfer20": "ordered transfer schema",
+    "NoAmplitude": "remove amp_rms, amp_peak, env_rms",
+    "NoOrder": "remove order_*",
+    "NoEnvelope": "remove env_*"
+  },
+  "analysis_source_sha256": "8f42c81b104836bb6c3dce97ddc86cda9697eed602e7794f6d8419103ec5eeb5",
+  "transfer_source_sha256": "8d6d37ed3e1ea960e6d5a993730da480dd8ad03a98e595dd9b8b713de8cbcfcd"
+}

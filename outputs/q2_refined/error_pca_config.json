@@ -1,0 +1,12 @@
+{
+  "fit_loads": [
+    1,
+    2,
+    3
+  ],
+  "purpose": "post-hoc explanation only",
+  "explained_variance_ratio": [
+    0.32434528687753306,
+    0.21214368894393335
+  ]
+}

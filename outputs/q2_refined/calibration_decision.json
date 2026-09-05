@@ -1,0 +1,12 @@
+{
+  "mlp": {
+    "recommend_source_calibration": false,
+    "mean_delta": {
+      "nll": 0.043975336402631515,
+      "ece": 0.02595393768509898,
+      "brier": 0.011929359062426093
+    },
+    "n_seeds_both_nll_ece_improved": 0,
+    "target_calibration_validated": false
+  }
+}
