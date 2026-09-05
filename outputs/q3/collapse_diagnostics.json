@@ -56,7 +56,7 @@
       "collapse_warning": true
     }
   },
-  "dann_consensus": {
+  "dann_mean_probability": {
     "class_count": {
       "N": 0,
       "B": 1,
@@ -67,7 +67,18 @@
     "effective_class_count": 1.2633812503027273,
     "collapse_warning": true
   },
-  "source_only": {
+  "dann_majority_vote": {
+    "class_count": {
+      "N": 0,
+      "B": 3,
+      "IR": 0,
+      "OR": 13
+    },
+    "max_class_fraction": 0.8125,
+    "effective_class_count": 1.6202453123826384,
+    "collapse_warning": true
+  },
+  "source_mlp": {
     "class_count": {
       "N": 13,
       "B": 3,
@@ -78,15 +89,26 @@
     "effective_class_count": 1.6202453123826384,
     "collapse_warning": true
   },
+  "source_linear": {
+    "class_count": {
+      "N": 13,
+      "B": 2,
+      "IR": 1,
+      "OR": 0
+    },
+    "max_class_fraction": 0.8125,
+    "effective_class_count": 1.8256278800579229,
+    "collapse_warning": true
+  },
   "coral": {
     "class_count": {
-      "N": 4,
+      "N": 0,
       "B": 4,
       "IR": 4,
-      "OR": 4
+      "OR": 8
     },
-    "max_class_fraction": 0.25,
-    "effective_class_count": 4.0,
+    "max_class_fraction": 0.5,
+    "effective_class_count": 2.82842712474619,
     "collapse_warning": false
   }
 }

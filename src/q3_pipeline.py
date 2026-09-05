@@ -176,22 +176,58 @@ def aggregate(frame: pd.DataFrame, probabilities: np.ndarray, method: str) -> pd
     return pd.DataFrame(rows)
 
 
-def coral_align(source_z: np.ndarray, target_z: np.ndarray, epsilon: float = 1e-4) -> np.ndarray:
-    """Whiten source covariance and recolour it to target covariance."""
-    if source_z.ndim != 2 or source_z.shape[1] != target_z.shape[1]:
-        raise ValueError("CORAL needs two finite matrices with equal dimensions")
-    if not np.isfinite(source_z).all() or not np.isfinite(target_z).all():
-        raise ValueError("CORAL input contains non-finite values")
-    sm, tm = source_z.mean(axis=0), target_z.mean(axis=0)
-    d = source_z.shape[1]
-    cs = np.cov(source_z - sm, rowvar=False) + epsilon * np.eye(d)
-    ct = np.cov(target_z - tm, rowvar=False) + epsilon * np.eye(d)
-    if not np.allclose(cs, cs.T) or not np.allclose(ct, ct.T):
-        raise ValueError("CORAL covariance is not symmetric")
-    def power(matrix, exponent):
-        values, vectors = np.linalg.eigh(matrix)
-        return (vectors * np.maximum(values, epsilon) ** exponent) @ vectors.T
-    return (source_z - sm) @ power(cs, -0.5) @ power(ct, 0.5) + tm
+def file_balanced_weights(file_ids: np.ndarray | pd.Series) -> np.ndarray:
+    """Weights summing to one, with every raw MAT file contributing equally."""
+    file_ids = np.asarray(file_ids, dtype=str)
+    if file_ids.ndim != 1 or len(file_ids) == 0:
+        raise ValueError("file identifiers must be a non-empty vector")
+    _, inverse, counts = np.unique(file_ids, return_inverse=True, return_counts=True)
+    return 1.0 / (len(counts) * counts[inverse])
+
+
+def weighted_mean_covariance(values: np.ndarray, file_ids: np.ndarray | pd.Series, epsilon: float = 0.0):
+    """Window-level covariance with equal aggregate contribution per MAT file."""
+    values = np.asarray(values, dtype=float)
+    weights = file_balanced_weights(file_ids)
+    if values.ndim != 2 or len(values) != len(weights) or not np.isfinite(values).all():
+        raise ValueError("weighted covariance needs a finite matrix aligned to file identifiers")
+    mean = np.sum(values * weights[:, None], axis=0)
+    centered = values - mean
+    covariance = centered.T @ (centered * weights[:, None]) + epsilon * np.eye(values.shape[1])
+    if not np.allclose(covariance, covariance.T) or not np.isfinite(covariance).all():
+        raise ValueError("weighted covariance is not finite and symmetric")
+    return mean, covariance, weights
+
+
+def _matrix_power(matrix: np.ndarray, exponent: float, epsilon: float) -> np.ndarray:
+    values, vectors = np.linalg.eigh(matrix)
+    return (vectors * np.maximum(values, epsilon) ** exponent) @ vectors.T
+
+
+def fit_coral_transform(source_z: np.ndarray, source_file_ids, target_z: np.ndarray, target_file_ids, epsilon: float = 1e-4) -> dict:
+    """Fit file-balanced CORAL; target data are used only without labels."""
+    if source_z.ndim != 2 or source_z.shape[1] != target_z.shape[1] or epsilon <= 0:
+        raise ValueError("CORAL needs equal-dimensional inputs and positive epsilon")
+    sm, cs, source_weights = weighted_mean_covariance(source_z, source_file_ids, epsilon)
+    tm, ct, target_weights = weighted_mean_covariance(target_z, target_file_ids, epsilon)
+    return {"source_mean": sm, "target_mean": tm,
+            "map": _matrix_power(cs, -0.5, epsilon) @ _matrix_power(ct, 0.5, epsilon),
+            "source_covariance": cs, "target_covariance": ct,
+            "source_weights": source_weights, "target_weights": target_weights, "epsilon": epsilon}
+
+
+def apply_coral(values: np.ndarray, transform: dict) -> np.ndarray:
+    aligned = (np.asarray(values, dtype=float) - transform["source_mean"]) @ transform["map"] + transform["target_mean"]
+    if not np.isfinite(aligned).all():
+        raise FloatingPointError("CORAL produced non-finite embedding")
+    return aligned
+
+
+def coral_align(source_z: np.ndarray, target_z: np.ndarray, source_file_ids=None, target_file_ids=None, epsilon: float = 1e-4) -> np.ndarray:
+    """Compatibility wrapper for file-balanced CORAL source alignment."""
+    source_file_ids = np.arange(len(source_z)) if source_file_ids is None else source_file_ids
+    target_file_ids = np.arange(len(target_z)) if target_file_ids is None else target_file_ids
+    return apply_coral(source_z, fit_coral_transform(source_z, source_file_ids, target_z, target_file_ids, epsilon))
 
 
 def window_weights(frame: pd.DataFrame, labels: np.ndarray | None = None) -> np.ndarray:
@@ -202,6 +238,21 @@ def window_weights(frame: pd.DataFrame, labels: np.ndarray | None = None) -> np.
     class_files = pd.Series(file_label).value_counts().to_dict()
     return np.asarray([1.0 / (len(LABELS) * class_files[file_label[row.file_id]] * counts[row.file_id])
                        for _, row in frame.iterrows()], dtype=float)
+
+
+def fit_source_linear(embeddings: np.ndarray, source: pd.DataFrame, seed: int = 2025) -> LogisticRegression:
+    """One and only one class/file balancing mechanism: sample_weight."""
+    head = LogisticRegression(max_iter=3000, class_weight=None, random_state=seed)
+    head.fit(embeddings, source.label.to_numpy(), sample_weight=window_weights(source, source.label.to_numpy()))
+    return head
+
+
+def linear_probabilities(head: LogisticRegression, embeddings: np.ndarray) -> np.ndarray:
+    probabilities = np.zeros((len(embeddings), len(LABELS)))
+    probabilities[:, [LABELS.index(str(label)) for label in head.classes_]] = head.predict_proba(embeddings)
+    if not np.isfinite(probabilities).all() or not np.allclose(probabilities.sum(axis=1), 1.0):
+        raise FloatingPointError("linear classifier probabilities are invalid")
+    return probabilities
 
 
 class GradientReverse(torch.autograd.Function):
@@ -300,18 +351,22 @@ def train_source_fold(source: pd.DataFrame, names: list[str], seed: int, epochs:
     return model.eval(), scaler
 
 
-def source_retention(source: pd.DataFrame, target: pd.DataFrame, names: list[str], epochs: int, domain_weight: float):
-    """LOLO with fold-specific source initialization; held-out load is never initialized from full Q2."""
+def coral_source_retention(source: pd.DataFrame, target: pd.DataFrame, names: list[str], epochs: int):
+    """LOLO for Source-MLP, Source-linear and CORAL without held-out source leakage."""
     rows = []
     for load in sorted(source.load.unique()):
         tr, te = source[source.load != load].copy(), source[source.load == load].copy()
         source_model, scaler = train_source_fold(tr, names, 5000 + int(load), epochs)
-        xte = scaler.transform(te[names].to_numpy(float)); _, base_p = infer(source_model.encoder, source_model.classifier, xte)
-        base = aggregate(te, base_p, "source_only_fold")
-        dann, dann_scaler, _ = train_dann(tr, target, names, 6000 + int(load), epochs, domain_weight, initial=(source_model.encoder, source_model.classifier, scaler))
-        _, dann_p = infer(dann.encoder, dann.classifier, dann_scaler.transform(te[names].to_numpy(float)))
-        adapted = aggregate(te, dann_p, "dann_fold")
-        for method, table in (("source_only", base), ("dann", adapted)):
+        ztr, _ = infer(source_model.encoder, source_model.classifier, scaler.transform(tr[names].to_numpy(float)))
+        zte, mlp_p = infer(source_model.encoder, source_model.classifier, scaler.transform(te[names].to_numpy(float)))
+        zt, _ = infer(source_model.encoder, source_model.classifier, scaler.transform(target[names].to_numpy(float)))
+        source_linear_head = fit_source_linear(ztr, tr, seed=7000 + int(load))
+        linear = aggregate(te, linear_probabilities(source_linear_head, zte), "source_linear_fold")
+        coral_transform = fit_coral_transform(ztr, tr.file_id, zt, target.file_id, epsilon=1e-4)
+        coral_head = fit_source_linear(apply_coral(ztr, coral_transform), tr, seed=8000 + int(load))
+        coral = aggregate(te, linear_probabilities(coral_head, apply_coral(zte, coral_transform)), "coral_fold")
+        source_mlp = aggregate(te, mlp_p, "source_mlp_fold")
+        for method, table in (("source_mlp", source_mlp), ("source_linear", linear), ("coral", coral)):
             table = table.merge(te.groupby("file_id").label.first().rename("true_label"), on="file_id")
             for _, row in table.iterrows():
                 rows.append({"load": int(load), "method": method, "file_id": row.file_id, "true_label": row.true_label,
@@ -324,9 +379,15 @@ def source_retention(source: pd.DataFrame, target: pd.DataFrame, names: list[str
                         "balanced_accuracy": balanced_accuracy_score(y, p),
                         **{f"recall_{k}": v for k, v in zip(LABELS, recall_score(y, p, labels=LABELS, average=None, zero_division=0))}})
     table = pd.DataFrame(summary).set_index("method")
-    delta = float(table.loc["dann", "macro_f1"] - table.loc["source_only", "macro_f1"])
-    return result, pd.DataFrame(summary), {"dann_minus_source_macro_f1": delta, "negative_transfer_flag": bool(delta < -0.05),
-                                           "threshold": -0.05, "evaluation_unit": "held-out source raw MAT file"}
+    against_linear = float(table.loc["coral", "macro_f1"] - table.loc["source_linear", "macro_f1"])
+    against_mlp = float(table.loc["coral", "macro_f1"] - table.loc["source_mlp", "macro_f1"])
+    return result, pd.DataFrame(summary), {
+        "coral_minus_source_linear_macro_f1": against_linear,
+        "coral_minus_source_mlp_macro_f1": against_mlp,
+        "negative_transfer_flag": bool(against_linear < -0.05 or against_mlp < -0.05),
+        "threshold": -0.05, "evaluation_unit": "held-out source raw MAT file",
+        "target_labels_used": False,
+    }
 
 
 def subsample_agreement(frame: pd.DataFrame, probabilities: np.ndarray, repeats: int = 20, fraction: float = .8, seed: int = 2025) -> dict[str, float]:
@@ -362,9 +423,10 @@ def make_figures(output: Path, source_z: np.ndarray, target_z: np.ndarray, dann_
     mean_hist = history.groupby("epoch")[["source_classification_loss", "domain_loss", "domain_accuracy"]].mean()
     fig, ax = plt.subplots(figsize=(6, 3.2)); mean_hist.plot(ax=ax); ax.set_title("DANN five-seed mean training history"); fig.tight_layout(); fig.savefig(figdir / "dann_training.png", dpi=250); fig.savefig(figdir / "dann_training.svg"); plt.close(fig)
     label_map = {v: i for i, v in enumerate(LABELS)}
-    fig, ax = plt.subplots(figsize=(9, 2.8)); matrix = final[["source_only_label", "coral_label", "dann_consensus_label", "final_candidate_label"]].replace(label_map).T.to_numpy()
-    im = ax.imshow(matrix, vmin=0, vmax=3, aspect="auto", cmap="tab10"); ax.set_yticks(range(4), ["Source-only", "CORAL", "DANN", "Final"]); ax.set_xticks(range(16), final.file_id); fig.colorbar(im, ax=ax, ticks=range(4)); fig.tight_layout(); fig.savefig(figdir / "method_comparison.png", dpi=250); fig.savefig(figdir / "method_comparison.svg"); plt.close(fig)
-    fig, ax = plt.subplots(figsize=(9, 3)); final.set_index("file_id")[["dann_seed_agreement", "window_vote_ratio", "subsample_agreement"]].plot.bar(ax=ax); ax.set_ylim(0, 1.05); fig.tight_layout(); fig.savefig(figdir / "target_stability.png", dpi=250); fig.savefig(figdir / "target_stability.svg"); plt.close(fig)
+    labels = ["source_mlp_label", "source_linear_label", "coral_label", "dann_majority_vote_label", "final_candidate_label"]
+    fig, ax = plt.subplots(figsize=(9, 3)); matrix = final[labels].apply(lambda column: column.map(label_map)).T.to_numpy()
+    im = ax.imshow(matrix, vmin=0, vmax=3, aspect="auto", cmap="tab10"); ax.set_yticks(range(5), ["Source-MLP", "Source-linear", "CORAL", "DANN vote", "Final"]); ax.set_xticks(range(16), final.file_id); fig.colorbar(im, ax=ax, ticks=range(4)); fig.tight_layout(); fig.savefig(figdir / "method_comparison.png", dpi=250); fig.savefig(figdir / "method_comparison.svg"); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(9, 3)); final.set_index("file_id")[["window_vote_ratio", "subsample_agreement", "coral_epsilon_agreement", "coral_loto_agreement"]].plot.bar(ax=ax); ax.set_ylim(0, 1.05); fig.tight_layout(); fig.savefig(figdir / "target_stability.png", dpi=250); fig.savefig(figdir / "target_stability.svg"); plt.close(fig)
     fig, ax = plt.subplots(figsize=(8, 2.8)); colours = final.reliability_level.map({"High": "#2ca02c", "Medium": "#ffbf00", "Review": "#d62728"}); ax.scatter(final.file_id, final.final_candidate_label, c=colours, s=70); ax.set_title("Final candidate and internal stability level"); fig.tight_layout(); fig.savefig(figdir / "final_candidates.png", dpi=250); fig.savefig(figdir / "final_candidates.svg"); plt.close(fig)
 
 
@@ -376,18 +438,47 @@ def main():
     if args.epochs < 1 or args.retention_epochs < 1 or args.domain_weight <= 0: raise ValueError("positive epochs and domain weight required")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "models").mkdir(parents=True, exist_ok=True)
+    old_coral_path = args.output_dir / "coral_predictions.csv"
+    old_coral = pd.read_csv(old_coral_path, encoding="utf-8-sig")[["file_id", "predicted_label"]].rename(columns={"predicted_label": "coral_label_before_revision"}) if old_coral_path.exists() else None
     source, target, names, audit = load_data(args.q1_dir, args.model_dir); write_json(args.output_dir / "input_audit.json", audit)
     encoder, classifier, scaler, schema = load_interface(args.model_dir, expected_features=names)
     zs, ps = infer(encoder, classifier, scaler.transform(source[names].to_numpy(float))); zt, pt = infer(encoder, classifier, scaler.transform(target[names].to_numpy(float)))
-    source_only = aggregate(target, pt, "source_only"); write_csv(args.output_dir / "source_only_predictions.csv", source_only)
-    # CORAL uses no labels on target: it changes only source embeddings before fitting its linear source head.
-    zsc = coral_align(zs, zt); coral_head = LogisticRegression(max_iter=3000, class_weight="balanced", random_state=2025)
-    coral_head.fit(zsc, source.label.to_numpy(), sample_weight=window_weights(source, np.ones(len(source))))
-    pc = np.zeros((len(target), 4)); pc[:, [LABELS.index(v) for v in coral_head.classes_]] = coral_head.predict_proba(zt)
-    coral = aggregate(target, pc, "coral"); write_csv(args.output_dir / "coral_predictions.csv", coral)
-    metric_rows = []
-    for name, a, b in (("source_only", zs, zt), ("coral", zsc, zt)):
-        metric_rows.append({"method": name, **domain_metrics(source, target, a, b)})
+    source_mlp = aggregate(target, pt, "source_mlp")
+    write_csv(args.output_dir / "source_only_predictions.csv", source_mlp)
+    write_csv(args.output_dir / "source_mlp_predictions.csv", source_mlp)
+    source_linear_head = fit_source_linear(zs, source)
+    source_linear = aggregate(target, linear_probabilities(source_linear_head, zt), "source_linear")
+    write_csv(args.output_dir / "source_linear_predictions.csv", source_linear)
+    epsilon_tables = []
+    for epsilon in (1e-5, 1e-4, 1e-3):
+        transform = fit_coral_transform(zs, source.file_id, zt, target.file_id, epsilon)
+        head = fit_source_linear(apply_coral(zs, transform), source)
+        table = aggregate(target, linear_probabilities(head, zt), "coral")
+        table["epsilon"] = epsilon
+        epsilon_tables.append(table)
+    epsilon_sensitivity = pd.concat(epsilon_tables, ignore_index=True)
+    write_csv(args.output_dir / "coral_epsilon_sensitivity.csv", epsilon_sensitivity)
+    coral = epsilon_sensitivity[np.isclose(epsilon_sensitivity.epsilon, 1e-4)].drop(columns="epsilon").reset_index(drop=True)
+    write_csv(args.output_dir / "coral_predictions.csv", coral)
+    coral_transform = fit_coral_transform(zs, source.file_id, zt, target.file_id, 1e-4)
+    zsc = apply_coral(zs, coral_transform)
+    formal_coral_probabilities = linear_probabilities(fit_source_linear(zsc, source), zt)
+    if not np.allclose(coral[[f"prob_{label}" for label in LABELS]].to_numpy(), aggregate(target, formal_coral_probabilities, "check")[[f"prob_{label}" for label in LABELS]].to_numpy()):
+        raise AssertionError("formal CORAL probabilities are not reproducible")
+    epsilon_votes = epsilon_sensitivity.pivot(index="file_id", columns="epsilon", values="predicted_label").reindex(coral.file_id)
+    coral_epsilon_agreement = {str(fid): float((row == coral.set_index("file_id").loc[str(fid), "predicted_label"]).mean()) for fid, row in epsilon_votes.iterrows()}
+    loto_rows = []
+    for file_id, indices in target.groupby("file_id", sort=True).indices.items():
+        keep = target.file_id.astype(str).to_numpy() != str(file_id)
+        transform = fit_coral_transform(zs, source.file_id, zt[keep], target.loc[keep, "file_id"], 1e-4)
+        head = fit_source_linear(apply_coral(zs, transform), source)
+        file_frame = target.iloc[np.asarray(indices)]
+        loto_rows.append(aggregate(file_frame, linear_probabilities(head, zt[np.asarray(indices)]), "coral_loto"))
+    coral_loto = pd.concat(loto_rows, ignore_index=True)
+    write_csv(args.output_dir / "coral_leave_one_target_out.csv", coral_loto)
+    metric_rows = [{"method": "source_mlp", **domain_metrics(source, target, zs, zt)},
+                   {"method": "source_linear", **domain_metrics(source, target, zs, zt)},
+                   {"method": "coral", **domain_metrics(source, target, zsc, zt)}]
     seed_tables, seed_probabilities, seed_embeddings_source, seed_embeddings_target, histories = [], [], [], [], []
     seed_window_tables = []
     for seed in SEEDS:
@@ -402,45 +493,61 @@ def main():
     histories = pd.DataFrame(histories); write_csv(args.output_dir / "dann_training_history.csv", histories)
     per_seed = pd.concat(seed_tables, ignore_index=True); write_csv(args.output_dir / "dann_seed_predictions.csv", per_seed)
     write_csv(args.output_dir / "dann_window_predictions_by_seed.csv", pd.concat(seed_window_tables, ignore_index=True))
-    mean_prob = np.mean(seed_probabilities, axis=0); dann_consensus = aggregate(target, mean_prob, "dann_consensus")
+    mean_prob = np.mean(seed_probabilities, axis=0); dann_consensus = aggregate(target, mean_prob, "dann_mean_probability")
     consensus_window = target[["file_id", "window_id"]].copy(); consensus_window["predicted_label"] = np.asarray(LABELS)[mean_prob.argmax(axis=1)]
     for i, label in enumerate(LABELS): consensus_window[f"prob_{label}"] = mean_prob[:, i]
-    write_csv(args.output_dir / "dann_window_predictions_consensus.csv", consensus_window)
+    write_csv(args.output_dir / "dann_window_predictions_mean_probability.csv", consensus_window)
     votes = per_seed.pivot(index="file_id", columns="seed", values="predicted_label").reindex(dann_consensus.file_id)
     dann_consensus["dann_seed_agreement"] = [float((row == row.mode().iloc[0]).mean()) for _, row in votes.iterrows()]
-    dann_consensus["dann_consensus_label"] = [row.mode().iloc[0] for _, row in votes.iterrows()]
-    write_csv(args.output_dir / "dann_consensus_predictions.csv", dann_consensus)
+    dann_consensus["dann_majority_vote_label"] = [row.mode().iloc[0] for _, row in votes.iterrows()]
+    dann_consensus["dann_mean_probability_label"] = dann_consensus.predicted_label
+    write_csv(args.output_dir / "dann_mean_probability_predictions.csv", dann_consensus)
+    write_csv(args.output_dir / "dann_majority_vote_predictions.csv", dann_consensus[["file_id", "dann_majority_vote_label", "dann_seed_agreement"]])
     mean_zsd, mean_ztd = np.mean(seed_embeddings_source, axis=0), np.mean(seed_embeddings_target, axis=0)
     metric_rows.append({"method": "dann", **domain_metrics(source, target, mean_zsd, mean_ztd)})
     metrics = pd.DataFrame(metric_rows); write_csv(args.output_dir / "domain_metrics.csv", metrics)
-    retention_rows, retention_summary, retention = source_retention(source, target, names, args.retention_epochs, args.domain_weight)
-    write_csv(args.output_dir / "source_retention_predictions.csv", retention_rows); write_csv(args.output_dir / "source_retention_summary.csv", retention_summary); write_json(args.output_dir / "source_retention.json", retention)
-    seed_collapse = {str(seed): collapse(block) for seed, block in per_seed.groupby("seed")}; consensus_collapse = collapse(dann_consensus)
-    write_json(args.output_dir / "collapse_diagnostics.json", {"dann_by_seed": seed_collapse, "dann_consensus": consensus_collapse, "source_only": collapse(source_only), "coral": collapse(coral)})
-    # Model choice is based on source retention, collapse and seed stability; no target label/probability is a selector.
-    mean_agree = float(dann_consensus.dann_seed_agreement.mean())
-    dann_allowed = not retention["negative_transfer_flag"] and not consensus_collapse["collapse_warning"] and mean_agree >= .60
-    final_method = "DANN" if dann_allowed else ("CORAL" if not collapse(coral)["collapse_warning"] else "Source-only")
-    selected = {"DANN": dann_consensus, "CORAL": coral, "Source-only": source_only}[final_method].copy()
-    final = source_only[["file_id", "predicted_label"]].rename(columns={"predicted_label": "source_only_label"}).merge(coral[["file_id", "predicted_label"]].rename(columns={"predicted_label": "coral_label"}), on="file_id").merge(dann_consensus, on="file_id")
-    final = final.merge(selected[["file_id", "predicted_label", "confidence", "window_vote_ratio", "normalized_entropy", "probability_margin", "window_probability_std", *[f"prob_{x}" for x in LABELS]]], on="file_id", suffixes=("", "_selected"))
-    final["final_candidate_label"] = final.predicted_label_selected; final["final_method"] = final_method
-    final["method_agreement_count"] = final.apply(lambda r: len({r.source_only_label, r.coral_label, r.dann_consensus_label}) and max(pd.Series([r.source_only_label, r.coral_label, r.dann_consensus_label]).value_counts()), axis=1)
-    final["subsample_agreement"] = final.file_id.map(subsample_agreement(target, mean_prob, seed=2025))
-    final["reliability_level"] = np.where((final.dann_seed_agreement >= .80) & (final.window_vote_ratio >= .75) & (final.subsample_agreement >= .85) & (final.method_agreement_count >= 2), "High", np.where((final.dann_seed_agreement >= .60) & (final.window_vote_ratio >= .60), "Medium", "Review"))
-    final["review_required"] = final.reliability_level.eq("Review") | (not dann_allowed)
-    final = final[["file_id", "source_only_label", "coral_label", "dann_consensus_label", "final_candidate_label", "final_method", *[f"prob_{x}" for x in LABELS], "dann_seed_agreement", "window_vote_ratio", "subsample_agreement", "method_agreement_count", "normalized_entropy", "probability_margin", "reliability_level", "review_required"]]
+    retention_rows, retention_summary, retention = coral_source_retention(source, target, names, args.retention_epochs)
+    write_csv(args.output_dir / "coral_source_retention_predictions.csv", retention_rows); write_csv(args.output_dir / "coral_source_retention_summary.csv", retention_summary); write_json(args.output_dir / "coral_source_retention.json", retention)
+    seed_collapse = {str(seed): collapse(block) for seed, block in per_seed.groupby("seed")}
+    mean_collapse = collapse(dann_consensus.assign(predicted_label=dann_consensus.dann_mean_probability_label))
+    majority_collapse = collapse(dann_consensus.assign(predicted_label=dann_consensus.dann_majority_vote_label))
+    write_json(args.output_dir / "collapse_diagnostics.json", {"dann_by_seed": seed_collapse, "dann_mean_probability": mean_collapse, "dann_majority_vote": majority_collapse, "source_mlp": collapse(source_mlp), "source_linear": collapse(source_linear), "coral": collapse(coral)})
+    # CORAL is the pre-specified formal method; DANN is never a selection gate.
+    final = coral.copy()
+    final = final.merge(source_mlp[["file_id", "predicted_label"]].rename(columns={"predicted_label": "source_mlp_label"}), on="file_id")
+    final = final.merge(source_linear[["file_id", "predicted_label"]].rename(columns={"predicted_label": "source_linear_label"}), on="file_id")
+    final = final.merge(dann_consensus[["file_id", "dann_mean_probability_label", "dann_majority_vote_label", "dann_seed_agreement"]], on="file_id")
+    final = final.merge(coral_loto[["file_id", "predicted_label"]].rename(columns={"predicted_label": "coral_loto_label"}), on="file_id")
+    final["coral_label"] = final.predicted_label
+    final["final_candidate_label"] = final.coral_label
+    final["final_method"] = "CORAL"
+    final["subsample_agreement"] = final.file_id.map(subsample_agreement(target, formal_coral_probabilities, seed=2025))
+    final["coral_epsilon_agreement"] = final.file_id.map(coral_epsilon_agreement)
+    final["coral_loto_agreement"] = (final.coral_label == final.coral_loto_label).astype(float)
+    final["source_linear_coral_agree"] = final.source_linear_label == final.coral_label
+    final["method_agreement_count"] = final.apply(lambda r: int(pd.Series([r.source_mlp_label, r.source_linear_label, r.coral_label]).value_counts().max()), axis=1)
+    high = (final.window_vote_ratio >= .75) & (final.subsample_agreement >= .85) & (final.coral_epsilon_agreement == 1.0) & (final.coral_loto_agreement == 1.0) & final.source_linear_coral_agree & (final.probability_margin >= .10)
+    medium = (final.window_vote_ratio >= .60) & (final.subsample_agreement >= .75) & (final.coral_epsilon_agreement >= 2/3) & (final.coral_loto_agreement == 1.0) & (final.probability_margin >= .05)
+    final["reliability_level"] = np.where(high, "High", np.where(medium, "Medium", "Review"))
+    final["review_required"] = final.reliability_level.eq("Review") | retention["negative_transfer_flag"]
+    final = final[["file_id", "source_mlp_label", "source_linear_label", "coral_label", "dann_mean_probability_label", "dann_majority_vote_label", "final_candidate_label", "final_method", "confidence", *[f"prob_{x}" for x in LABELS], "window_vote_ratio", "window_probability_std", "subsample_agreement", "coral_epsilon_agreement", "coral_loto_agreement", "source_linear_coral_agree", "method_agreement_count", "normalized_entropy", "probability_margin", "reliability_level", "review_required"]]
     if len(final) != 16 or sorted(final.file_id) != list("ABCDEFGHIJKLMNOP"): raise AssertionError("Final output must contain A--P exactly once")
+    if not np.array_equal(final.final_candidate_label.to_numpy(), np.asarray(LABELS)[final[[f"prob_{x}" for x in LABELS]].to_numpy().argmax(axis=1)]): raise AssertionError("Final label/probability mismatch")
     write_csv(args.output_dir / "target_predictions_final.csv", final)
+    changes = final[["file_id", "coral_label"]].merge(old_coral, on="file_id", how="left") if old_coral is not None else final[["file_id", "coral_label"]].assign(coral_label_before_revision=np.nan)
+    changes["label_changed"] = changes.coral_label != changes.coral_label_before_revision
+    write_csv(args.output_dir / "coral_label_changes.csv", changes)
     write_csv(args.output_dir / "embeddings_source_before.csv", pd.DataFrame(zs)); write_csv(args.output_dir / "embeddings_target_before.csv", pd.DataFrame(zt)); write_csv(args.output_dir / "embeddings_source_dann.csv", pd.DataFrame(mean_zsd)); write_csv(args.output_dir / "embeddings_target_dann.csv", pd.DataFrame(mean_ztd))
     joblib.dump(scaler, args.output_dir / "models" / "q3_input_scaler.pkl")
     write_json(args.output_dir / "models" / "q3_transfer_schema.json", {"features": names, "labels": list(LABELS), "input_dim": 20, "embedding_dim": 32})
     make_figures(args.output_dir, zs, zt, mean_zsd, mean_ztd, metrics, histories, final)
     metric_lines = ["| method | MMD | PAD | domain BA |", "|---|---:|---:|---:|"]
     metric_lines += [f"| {r.method} | {r.mmd_file_level:.4f} | {r.proxy_a_distance:.4f} | {r.domain_balanced_accuracy:.4f} |" for r in metrics.itertuples()]
-    summary = ["# 第三问：无监督跨域候选诊断结果", "", "目标 A–P 没有真值标签；本目录不含、也不报告目标域准确率。所有类别均是模型候选。", "", "## 方法选择", "", f"最终候选方法：`{final_method}`。DANN source-retention F1 差值（DANN−source-only）为 `{retention['dann_minus_source_macro_f1']:.3f}`，负迁移标记为 `{retention['negative_transfer_flag']}`；DANN 平均 seed agreement 为 `{mean_agree:.3f}`，类别塌缩标记为 `{consensus_collapse['collapse_warning']}`。", "", "## 域差异（文件级 embedding）", "", *metric_lines, "", "MMD/PAD 的下降只说明域表征更难区分，不能证明目标类别正确。", "", "## 可复核输出", "", "- `target_predictions_final.csv`：A–P 的最终候选、三方法对照和内部稳定性；", "- `source_retention_summary.csv`：fold-specific 源域 LOLO 保持验证；", "- `dann_training_history.csv`、`domain_metrics.csv`、embedding CSV：供第四问解释；", "- `figures/`：PCA、域指标、训练曲线、方法差异、稳定性和最终候选。"]
+    retention_lines = ["| method | Macro-F1 | BA | Recall N | Recall B | Recall IR | Recall OR |", "|---|---:|---:|---:|---:|---:|---:|"]
+    retention_lines += [f"| {r.method} | {r.macro_f1:.4f} | {r.balanced_accuracy:.4f} | {r.recall_N:.4f} | {r.recall_B:.4f} | {r.recall_IR:.4f} | {r.recall_OR:.4f} |" for r in retention_summary.itertuples()]
+    summary = ["# 第三问：CORAL 无监督跨域候选诊断结果", "", "目标 A–P 没有真值标签；本目录不含、也不报告目标域准确率。所有类别均是模型候选。", "", "## 正式方法", "", f"正式方法固定为 `CORAL`。其协方差采用窗口级、文件等权统计；线性头仅通过 sample_weight 进行一次类别/文件平衡。CORAL source-retention 负迁移标记为 `{retention['negative_transfer_flag']}`。DANN 仅为对照，其 mean-probability 与 majority-vote 标签均独立保存。", "", "## 域差异（文件级 embedding）", "", *metric_lines, "", "## CORAL 源域 LOLO 保持", "", *retention_lines, "", "MMD/PAD 的下降只说明域表征更难区分，不能证明目标类别正确。epsilon 与 LOTO 检查只用于稳定性评估，未用于调参或选标签。", "", "## 可复核输出", "", "- `target_predictions_final.csv`：最终 CORAL 候选及一致性、稳定性、复核标记；", "- `source_linear_predictions.csv`、`coral_source_retention_summary.csv`、`coral_epsilon_sensitivity.csv`、`coral_leave_one_target_out.csv`；", "- `coral_label_changes.csv`：修正前后标签对照；", "- `dann_*`：失败对照、训练历史和窗口级预测。"]
     (args.output_dir / "q3_summary.md").write_text("\n".join(summary) + "\n", encoding="utf-8")
-    write_json(args.output_dir / "q3_config.json", {"seeds": SEEDS, "epochs": args.epochs, "retention_epochs": args.retention_epochs, "domain_weight": args.domain_weight, "final_method": final_method, "target_labels_used": False, "statistical_unit": "raw MAT file"})
+    write_json(args.output_dir / "q3_config.json", {"seeds": SEEDS, "epochs": args.epochs, "retention_epochs": args.retention_epochs, "domain_weight": args.domain_weight, "final_method": "CORAL", "coral_epsilon": 1e-4, "coral_epsilon_sensitivity": [1e-5, 1e-4, 1e-3], "target_labels_used": False, "statistical_unit": "raw MAT file"})
     print(f"Question 3 outputs written to {args.output_dir}")
 
 
