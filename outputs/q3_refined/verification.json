@@ -1,0 +1,15 @@
+{
+  "tests_preconditions": {
+    "target_label_absent": true,
+    "finite_features": true,
+    "final_argmax_consistent": true,
+    "target_file_count": 16
+  },
+  "target_accuracy_reported": false,
+  "target_labels_used": false,
+  "formal_variant": "s56_class_balanced",
+  "final_method": "Class-Regularized OT Transfer-v2 S56",
+  "source_retention_negative_transfer_vs_source_mlp": -0.05357404672622068,
+  "ot_source_retention_minus_source_mlp": 0.01525268210050823,
+  "notes": "MMD/PAD and stability are diagnostics, not target performance."
+}

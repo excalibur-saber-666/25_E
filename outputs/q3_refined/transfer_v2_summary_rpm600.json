@@ -1,0 +1,11 @@
+{
+  "source_written": true,
+  "source_windows": 1594,
+  "target_windows": 304,
+  "source_files": 56,
+  "target_files": 16,
+  "target_nominal_rpm": 600.0,
+  "source_order_resolution": 0.25,
+  "target_order_resolution": 0.25,
+  "target_labels_used": false
+}
