@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 import pandas as pd
 import joblib
+import json
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 import q2_pipeline as q
@@ -50,13 +51,14 @@ class MetricTests(unittest.TestCase):
         saved=pd.read_csv(path/'predictions.csv').sort_values('file_id')
         np.testing.assert_allclose(predicted[a.r.PROBS],saved[a.r.PROBS],rtol=1e-6,atol=1e-7)
 
-    def test_saved_calibration_does_not_change_predictions(self):
-        p=pd.read_csv('outputs/q2_refined/calibrated_oof_predictions.csv')
-        keys=['model','seed','file_id']
-        before=p[p.calibration=='before'].sort_values(keys)
-        after=p[p.calibration=='after'].sort_values(keys)
-        np.testing.assert_array_equal(before.predicted_label,after.predicted_label)
-        np.testing.assert_allclose(after[a.r.PROBS].sum(1),1,atol=1e-10)
+    def test_calibration_decision_is_preserved_without_regenerable_predictions(self):
+        # Per-file calibration predictions are deliberately excluded from the
+        # frozen repository; the aggregate decision and leakage audit remain.
+        p=pd.read_csv('outputs/q2_refined/calibration_metrics.csv')
+        self.assertTrue((p.file_leakage_count==0).all())
+        self.assertTrue((p.temperature>0).all())
+        decision=json.loads(Path('outputs/q2_refined/calibration_decision.json').read_text(encoding='utf-8'))
+        self.assertFalse(decision['mlp']['recommend_source_calibration'])
 
 
 if __name__ == '__main__': unittest.main()

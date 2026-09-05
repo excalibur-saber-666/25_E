@@ -1,0 +1,32 @@
+{
+  "features": [
+    "shape_skew",
+    "shape_kurtosis",
+    "shape_crest",
+    "zcr",
+    "psd_entropy",
+    "psd_peak_ratio",
+    "psd_0_500",
+    "psd_500_1000",
+    "psd_1000_2000",
+    "psd_4000_8000",
+    "env_kurtosis",
+    "env_entropy",
+    "env_peak_ratio",
+    "env_0_500",
+    "env_500_1000",
+    "env_2000_4000",
+    "order_0.5_2",
+    "order_2_4",
+    "order_4_8",
+    "order_8_16"
+  ],
+  "labels": [
+    "N",
+    "B",
+    "IR",
+    "OR"
+  ],
+  "input_dim": 20,
+  "embedding_dim": 32
+}

@@ -1,6 +1,6 @@
 # 2025 Huawei Cup E — bearing-fault transfer analysis
 
-本仓库包含华为杯 E 题材料、数据审计代码和第一问的可复现实验结果。
+本仓库包含华为杯 E 题材料、数据审计代码和前三问的可复现实验结果。
 
 第一问已封版，第二问源域诊断及其深入完善入口见下文。目标文件 A–P 无真值标签：
 
@@ -38,5 +38,14 @@ python -m unittest discover -s tests -p "test_q2_*.py"
 [第二问深入完善交接](项目说明/第二问深入完善交接.md) 和
 [实际结果报告](outputs/q2_refined/q2_refined_summary.md)。
 第三问只考虑通过门槛和接口检查的 `q2_transfer20_*` 初始化材料；旧版 26D encoder 不适配 20D Transfer 输入。
+
+第三问的正式无监督结果（Source-only → CORAL → 五种子 DANN、源域保持验证和 A–P 候选）可复现：
+
+```powershell
+python .\src\q3_pipeline.py
+python -m unittest discover -s tests -p "test_q3_*.py"
+```
+
+结果位于 `outputs/q3/`。DANN 出现严重目标类别塌缩，因此正式候选选择 CORAL；A–P 没有真值，候选标签、softmax、MMD/PAD 和可靠性等级均不等于目标诊断准确率。总交接入口见 [项目总体进程](项目总体进程.md)。
 
 关键约束：所有训练/验证必须按原始 `.mat` 文件分组；重叠窗口不是独立样本；没有目标真值和目标轴承几何时，不报告目标准确率或强行标注 BPFO/BPFI/BSF。

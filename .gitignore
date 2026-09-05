@@ -3,3 +3,25 @@
 
 # Lossless TIFF exports are retained locally but can exceed GitHub's 100 MB file limit.
 outputs/**/figures/*.tiff
+
+# Regenerable Question 2 training caches and intermediate audit artefacts.
+outputs/q2_refined/runs/
+outputs/q2_refined/calibration_runs/
+outputs/q2_refined/calibrated_oof_predictions.csv
+outputs/q2_refined/calibration_training_oof_predictions.csv
+outputs/q2_refined/calibration_pooled_by_seed.csv
+outputs/q2_refined/classification_reports_by_seed.csv
+outputs/q2_refined/diagnostic_ablation_folds.csv
+outputs/q2_refined/feature_group_ablation_folds.csv
+outputs/q2_refined/error_pca_*.json
+outputs/q2_refined/error_pca_*.csv
+outputs/q2_refined/figure_*.json
+outputs/q2_refined/metadata_load_by_*.csv
+outputs/q2_refined/reliability_bins.csv
+outputs/q2_refined/transfer20_refit_history.csv
+outputs/q2_refined/figures/*.pdf
+
+# Python bytecode and superseded exploratory outputs are local only.
+__pycache__/
+src/__pycache__/
+tests/__pycache__/

@@ -92,7 +92,7 @@ NLL 按文件平均，Brier 为四类平方误差之和的文件均值，ECE 用
 }
 ```
 内层校准文件来自已见的训练载荷，而外层是未见载荷，概率可靠性并不必然外推。当前结果支持“不采用这次校准”，不能据此断言所有校准方法普遍无效。
-校准参数按折保存在 calibration_runs/；默认导出的全源模型保持未经校准。源域 T 不可直接当作目标域可信度保证；Transfer20 概率也尚未校准。
+校准参数的详细缓存可由脚本重建，封版仓库不再跟踪；默认导出的全源模型保持未经校准。源域 T 不可直接当作目标域可信度保证；Transfer20 概率也尚未校准。
 
 ## 消融与 20D 接口
 
@@ -128,12 +128,12 @@ python src/q2_robustness.py --stage transfer
 python src/q2_robustness.py --stage analysis
 python -m unittest discover -s tests -p "test_q2_*.py"
 ```
-可用 --stage all 一次运行。runs 缓存按输入/训练代码哈希验证；q2_refined_config.json 记录版本、特征输入哈希、随机种子、采样与校准定义。
+可用 --stage all 一次运行。详细 runs 缓存不作为封版结果跟踪；q2_refined_config.json 记录版本、特征输入哈希、随机种子、采样与校准定义。
 
 ## 修改范围与后续工作
 
 新增 src/q2_robustness.py、src/q2_analysis.py、src/q2_transfer_pretrain.py 及 tests；第一问源数据、标签、metadata、原 q2_pipeline.py 和 outputs/q2 基线未修改。
-现有项目交接文件为根目录 项目总体进程实现.txt；本报告与 项目说明/第二问深入完善交接.md 是本轮续接入口。
-第二问已完成源域证据补强，尚未训练目标域迁移算法。进入第三问前先查工程门槛与源/目标特征 schema；从 source-only 基线开始设计无监督验证，需检测域漂移、负迁移和置信度变化。
+总体交接文件为根目录 项目总体进程.md；本报告与 项目说明/第二问深入完善交接.md 是第二问细节入口。
+第二问已完成源域证据补强；第三问已完成 Source-only、CORAL、DANN 对照，正式候选与交接见 outputs/q3/ 和 项目说明/第三问实施与第四问交接.md。
 源域只有 56 个独立文件、N 仅四文件；需区分各载荷数量覆盖和故障尺寸/位置的物理混杂。CWRU 跨载荷泛化不等同高速列车目标泛化。
 补充审计：第一问 Diagnostic26 来自全源域方差/相关性筛选及预定可疑特征排除；MI 用作审计而未用于该筛选条件。故本轮嵌套验证只覆盖固定 schema 下第二问的拟合过程，不能声称从特征筛选开始的端到端完全独立。若需这种声明，必须把第一问数据驱动筛选纳入外层训练折重做；本次按任务要求保持第一问不变。Transfer20 则是第一问预定义的固定名单。
