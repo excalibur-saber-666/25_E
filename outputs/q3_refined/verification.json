@@ -1,15 +1,98 @@
 {
-  "tests_preconditions": {
-    "target_label_absent": true,
-    "finite_features": true,
-    "final_argmax_consistent": true,
-    "target_file_count": 16
-  },
-  "target_accuracy_reported": false,
   "target_labels_used": false,
-  "formal_variant": "s56_class_balanced",
-  "final_method": "Class-Regularized OT Transfer-v2 S56",
-  "source_retention_negative_transfer_vs_source_mlp": -0.05357404672622068,
-  "ot_source_retention_minus_source_mlp": 0.01525268210050823,
-  "notes": "MMD/PAD and stability are diagnostics, not target performance."
+  "pdf_or_reference_labels_used": false,
+  "duplicate_transfer_feature_removed": true,
+  "ablation_sets_are_distinct": true,
+  "surrogate_uda_protocol_fair": true,
+  "surrogate_target_labels_hidden_during_adaptation": true,
+  "final_geometry_matches_final_method": true,
+  "final_argmax_consistent": true,
+  "target_file_count": 16,
+  "selected_final_method": "source_only",
+  "selection_basis": "surrogate UDA F1 exceeds both adaptation methods by predeclared 0.01",
+  "selection_thresholds": {
+    "f1_tie": 0.005,
+    "ba_tie": 0.005,
+    "worst_load_f1_tie": 0.02,
+    "seed_stability_tie": 0.03
+  },
+  "surrogate_uda_metrics": [
+    {
+      "method": "class_regularized_ot",
+      "macro_f1_mean": 0.9421703296703297,
+      "macro_f1_std": 0.043028284311777014,
+      "balanced_accuracy_mean": 0.9523809523809524,
+      "balanced_accuracy_std": 0.04374088826398533,
+      "recall_N": 1.0,
+      "recall_B": 1.0,
+      "recall_IR": 0.9166666666666666,
+      "recall_OR": 0.8928571428571429,
+      "worst_load_f1": 0.8785714285714287,
+      "collapse_warning": false,
+      "evaluation_unit": "held-out source raw MAT file after unlabelled-target adaptation"
+    },
+    {
+      "method": "coral",
+      "macro_f1_mean": 0.9421703296703297,
+      "macro_f1_std": 0.043028284311777014,
+      "balanced_accuracy_mean": 0.9523809523809524,
+      "balanced_accuracy_std": 0.04374088826398533,
+      "recall_N": 1.0,
+      "recall_B": 1.0,
+      "recall_IR": 0.9166666666666666,
+      "recall_OR": 0.8928571428571429,
+      "worst_load_f1": 0.8785714285714287,
+      "collapse_warning": false,
+      "evaluation_unit": "held-out source raw MAT file after unlabelled-target adaptation"
+    },
+    {
+      "method": "source_only",
+      "macro_f1_mean": 0.9696428571428571,
+      "macro_f1_std": 0.05258011380119802,
+      "balanced_accuracy_mean": 0.9702380952380952,
+      "balanced_accuracy_std": 0.05154913117764517,
+      "recall_N": 1.0,
+      "recall_B": 1.0,
+      "recall_IR": 0.9166666666666666,
+      "recall_OR": 0.9642857142857143,
+      "worst_load_f1": 0.8785714285714287,
+      "collapse_warning": false,
+      "evaluation_unit": "held-out source raw MAT file after unlabelled-target adaptation"
+    }
+  ],
+  "method_target_stability": [
+    {
+      "method": "source_only",
+      "seed_agreement_mean": 0.7625,
+      "rpm_agreement_mean": 0.9375,
+      "loto_agreement_mean": 1.0,
+      "subsample_agreement_mean": 0.965625
+    },
+    {
+      "method": "coral",
+      "seed_agreement_mean": 0.85,
+      "rpm_agreement_mean": 0.9583333333333333,
+      "loto_agreement_mean": 1.0,
+      "subsample_agreement_mean": 0.9875
+    },
+    {
+      "method": "class_regularized_ot",
+      "seed_agreement_mean": 0.8125,
+      "rpm_agreement_mean": 0.9791666666666666,
+      "loto_agreement_mean": 1.0,
+      "subsample_agreement_mean": 0.996875
+    }
+  ],
+  "schema_audit": {
+    "old_feature_count": 29,
+    "new_feature_count": 30,
+    "removed_duplicate_feature": "angle_psd_entropy",
+    "added_nonfixed_fullband_envelope_features": [
+      "envelope_kurtosis",
+      "envelope_order_entropy"
+    ],
+    "duplicate_feature_pairs": [],
+    "duplicate_feature_check_passed": true,
+    "check_domain": "source Transfer-v2 numeric feature matrix only"
+  }
 }

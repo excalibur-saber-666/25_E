@@ -1,0 +1,81 @@
+{
+  "sets": {
+    "full": [
+      "shape_skew",
+      "shape_kurtosis",
+      "shape_crest",
+      "zcr",
+      "angle_psd_peak_ratio",
+      "angle_order_entropy",
+      "angle_order_0_5_2",
+      "angle_order_2_4",
+      "angle_order_4_8",
+      "angle_order_8_16",
+      "envelope_kurtosis",
+      "envelope_order_entropy",
+      "env_500_2000_kurtosis",
+      "env_500_2000_order_entropy",
+      "env_500_2000_order_0_5_2",
+      "env_500_2000_order_2_4",
+      "env_500_2000_order_4_8",
+      "env_500_2000_order_8_16",
+      "env_2000_4000_kurtosis",
+      "env_2000_4000_order_entropy",
+      "env_2000_4000_order_0_5_2",
+      "env_2000_4000_order_2_4",
+      "env_2000_4000_order_4_8",
+      "env_2000_4000_order_8_16",
+      "env_4000_8000_kurtosis",
+      "env_4000_8000_order_entropy",
+      "env_4000_8000_order_0_5_2",
+      "env_4000_8000_order_2_4",
+      "env_4000_8000_order_4_8",
+      "env_4000_8000_order_8_16"
+    ],
+    "no_absolute_hz": [
+      "shape_skew",
+      "shape_kurtosis",
+      "shape_crest",
+      "zcr",
+      "angle_psd_peak_ratio",
+      "angle_order_entropy",
+      "angle_order_0_5_2",
+      "angle_order_2_4",
+      "angle_order_4_8",
+      "angle_order_8_16",
+      "envelope_kurtosis",
+      "envelope_order_entropy"
+    ],
+    "no_envelope": [
+      "shape_skew",
+      "shape_kurtosis",
+      "shape_crest",
+      "zcr",
+      "angle_psd_peak_ratio",
+      "angle_order_entropy",
+      "angle_order_0_5_2",
+      "angle_order_2_4",
+      "angle_order_4_8",
+      "angle_order_8_16"
+    ],
+    "no_order": [
+      "shape_skew",
+      "shape_kurtosis",
+      "shape_crest",
+      "zcr",
+      "angle_psd_peak_ratio",
+      "envelope_kurtosis",
+      "env_500_2000_kurtosis",
+      "env_2000_4000_kurtosis",
+      "env_4000_8000_kurtosis"
+    ]
+  },
+  "feature_counts": {
+    "full": 30,
+    "no_absolute_hz": 12,
+    "no_envelope": 10,
+    "no_order": 9
+  },
+  "sets_are_distinct": true,
+  "rule": "no_absolute_hz removes fixed-Hz env_* features; no_envelope additionally removes full-band envelope descriptors; no_order removes every order-domain descriptor."
+}

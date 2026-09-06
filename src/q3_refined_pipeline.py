@@ -8,8 +8,10 @@ other source variants and seeds are sensitivity evidence, not label voting.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +41,24 @@ def write_csv(path: Path, table: pd.DataFrame) -> None:
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=lambda x: x.item() if isinstance(x, np.generic) else str(x)), encoding="utf-8")
+
+
+def pre_fair_prediction_baseline(output: Path) -> pd.DataFrame | None:
+    """Reporting-only snapshot of the committed pre-fair-benchmark candidates.
+
+    It is never supplied to a model, metric, selection rule, or transform.
+    """
+    backup = output / "target_predictions_pre_fair_benchmark.csv"
+    if backup.exists():
+        return pd.read_csv(backup)[["file_id", "candidate_label"]].rename(columns={"candidate_label": "before_fair_benchmark"})
+    try:
+        payload = subprocess.run(["git", "show", "HEAD:outputs/q3_refined/target_predictions_final.csv"], check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        frame = pd.read_csv(io.StringIO(payload))
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(backup, index=False, encoding="utf-8-sig")
+        return frame[["file_id", "candidate_label"]].rename(columns={"candidate_label": "before_fair_benchmark"})
+    except (OSError, subprocess.CalledProcessError, pd.errors.EmptyDataError):
+        return None
 
 
 def load_inputs(output: Path, rpm: int = 600) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
@@ -259,10 +279,21 @@ def raw_feature_coral(source: pd.DataFrame, target: pd.DataFrame, names: list[st
     return aggregate(target, probabilities(head, xt), "raw_feature_coral")
 
 
-def feature_ablation(source: pd.DataFrame, names: list[str]) -> pd.DataFrame:
-    """Fixed source-only LOLO ablations; they do not inspect target predictions."""
-    sets = {"full": names, "no_absolute_hz": [x for x in names if not x.startswith("env_")],
-            "no_order": [x for x in names if "order" not in x], "no_envelope": [x for x in names if not x.startswith("env_")]}
+def ablation_sets(names: list[str]) -> dict[str, list[str]]:
+    """Predeclared feature sets; only env_* depends on fixed Hz band edges."""
+    sets = {"full": list(names),
+            "no_absolute_hz": [x for x in names if not x.startswith("env_")],
+            "no_envelope": [x for x in names if not (x.startswith("env_") or x.startswith("envelope_"))],
+            "no_order": [x for x in names if "order" not in x]}
+    signatures = {name: tuple(columns) for name, columns in sets.items()}
+    if len(set(signatures.values())) != len(sets) or any(not columns for columns in sets.values()):
+        raise AssertionError("Transfer-v2 ablation sets must be non-empty and distinct")
+    return sets
+
+
+def feature_ablation(source: pd.DataFrame, names: list[str]) -> tuple[pd.DataFrame, dict]:
+    """Fixed source-only LOLO probes; A--P is never read by this function."""
+    sets = ablation_sets(names)
     rows = []
     files = source.groupby("file_id").first()[["label", "load"]].join(source.groupby("file_id")[names].mean())
     for name, cols in sets.items():
@@ -275,7 +306,9 @@ def feature_ablation(source: pd.DataFrame, names: list[str]) -> pd.DataFrame:
             predictions.extend(head.predict(xte)); truth.extend(test.label)
         rows.append({"ablation": name, "feature_count": len(cols), "macro_f1": f1_score(truth, predictions, labels=LABELS, average="macro", zero_division=0),
                      "balanced_accuracy": balanced_accuracy_score(truth, predictions), "evaluation": "source file-level LOLO logistic probe only"})
-    return pd.DataFrame(rows)
+    schema = {"sets": sets, "feature_counts": {name: len(columns) for name, columns in sets.items()},
+              "sets_are_distinct": True, "rule": "no_absolute_hz removes fixed-Hz env_* features; no_envelope additionally removes full-band envelope descriptors; no_order removes every order-domain descriptor."}
+    return pd.DataFrame(rows), schema
 
 
 def _sinkhorn(cost: np.ndarray, source_mass: np.ndarray, target_mass: np.ndarray, epsilon: float = .05, iterations: int = 300) -> np.ndarray:
@@ -346,7 +379,7 @@ def ot_retention(source: pd.DataFrame, target: pd.DataFrame, names: list[str], e
                  "unit": "held-out source raw MAT file"}
 
 
-def main() -> None:
+def legacy_main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/q3_refined"))
     parser.add_argument("--data-root", type=Path, default=Path("数据集") / "数据集")
@@ -534,6 +567,271 @@ def main() -> None:
                "formal_variant": FORMAL_VARIANT, "final_method": final_method, "rpm_sensitivity": [570, 600, 630], "coral_epsilon": 1e-4,
                "target_labels_used": False, "statistical_unit": "raw MAT file"})
     print(f"Refined Question 3 outputs written to {args.output_dir}")
+
+
+def _method_probabilities(method: str, source: pd.DataFrame, target: pd.DataFrame, zs: np.ndarray, zt: np.ndarray,
+                          source_mlp_probabilities: np.ndarray, seed: int) -> tuple[np.ndarray, dict | None]:
+    """Adapt with target features only; target labels are structurally unavailable."""
+    if "label" in target.columns:
+        raise ValueError("Surrogate/real target labels must not enter adaptation")
+    if method == "source_only":
+        return source_mlp_probabilities, None
+    if method == "coral":
+        transform = fit_coral(zs, source, zt, target, FORMAL_VARIANT)
+        head = fit_head(apply_coral(zs, transform), source, seed)
+        return probabilities(head, zt), transform
+    if method == "class_regularized_ot":
+        transform = fit_class_regularized_ot(zs, source, zt, target)
+        head = fit_head(apply_ot(zs, transform), source, seed)
+        return probabilities(head, zt), transform
+    raise ValueError(method)
+
+
+def surrogate_uda_benchmark(source: pd.DataFrame, names: list[str], epochs: int) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Fair LOLO-as-unlabelled-target benchmark, with labels opened only after inference."""
+    rows, fold_rows, protocol = [], [], []
+    for load in sorted(source.load.unique()):
+        train = source[source.load != load].copy()
+        held_out_with_labels = source[source.load == load].copy()
+        truth = held_out_with_labels.groupby("file_id").label.first().copy()
+        pseudo_target = held_out_with_labels.drop(columns="label")
+        if "label" in pseudo_target.columns:
+            raise AssertionError("held-out labels leaked into adaptation frame")
+        model, scaler = train_encoder(train, names, 12000 + int(load), epochs)
+        ztrain, _ = infer(model, scaler.transform(train[names].to_numpy(float)))
+        ztarget, source_p = infer(model, scaler.transform(pseudo_target[names].to_numpy(float)))
+        protocol.append({"held_out_load": int(load), "adaptation_target_has_label": False,
+                         "scaler_fit_files": int(train.file_id.nunique()), "pseudo_target_files": int(pseudo_target.file_id.nunique())})
+        for method in ("source_only", "coral", "class_regularized_ot"):
+            p, _ = _method_probabilities(method, train, pseudo_target, ztrain, ztarget, source_p, 13000 + int(load))
+            table = aggregate(pseudo_target, p, method).set_index("file_id").loc[truth.index].reset_index()
+            table["held_out_load"] = int(load)
+            table["true_label"] = table.file_id.map(truth)
+            table["margin"] = table["probability_margin"]; table["entropy"] = table["normalized_entropy"]
+            rows.extend(table[["held_out_load", "file_id", "true_label", "method", "predicted_label", *[f"prob_{x}" for x in LABELS], "confidence", "margin", "entropy"]].to_dict("records"))
+            y, pred = table.true_label.to_numpy(), table.predicted_label.to_numpy()
+            fold_rows.append({"held_out_load": int(load), "method": method,
+                              "macro_f1": f1_score(y, pred, labels=LABELS, average="macro", zero_division=0),
+                              "balanced_accuracy": balanced_accuracy_score(y, pred),
+                              **{f"recall_{x}": v for x, v in zip(LABELS, recall_score(y, pred, labels=LABELS, average=None, zero_division=0))},
+                              "collapse_warning": bool(len(set(pred)) == 1)})
+    predictions, folds = pd.DataFrame(rows), pd.DataFrame(fold_rows)
+    summary = []
+    for method, part in folds.groupby("method"):
+        oof = predictions[predictions.method == method]
+        y, pred = oof.true_label.to_numpy(), oof.predicted_label.to_numpy()
+        summary.append({"method": method, "macro_f1_mean": float(part.macro_f1.mean()), "macro_f1_std": float(part.macro_f1.std(ddof=0)),
+                        "balanced_accuracy_mean": float(part.balanced_accuracy.mean()), "balanced_accuracy_std": float(part.balanced_accuracy.std(ddof=0)),
+                        **{f"recall_{x}": v for x, v in zip(LABELS, recall_score(y, pred, labels=LABELS, average=None, zero_division=0))},
+                        "worst_load_f1": float(part.macro_f1.min()), "collapse_warning": bool(part.collapse_warning.any()),
+                        "evaluation_unit": "held-out source raw MAT file after unlabelled-target adaptation"})
+    audit = {"protocol_fair": True, "held_out_labels_hidden_during_adaptation": True, "folds": protocol,
+             "rule": "Labels are copied for scoring only after each method has completed prediction."}
+    return predictions, pd.DataFrame(summary), audit
+
+
+def select_final_method(summary: pd.DataFrame, coral_seed_stability: float, ot_seed_stability: float) -> tuple[str, dict]:
+    """Predeclared selection: benchmark first, then stability/simplicity; never target labels."""
+    metric = summary.set_index("method")
+    source, coral, ot = (metric.loc[name] for name in ("source_only", "coral", "class_regularized_ot"))
+    # A source-only win by more than 0.01 is meaningful enough to avoid an unnecessary adaptation step.
+    if source.macro_f1_mean >= max(coral.macro_f1_mean, ot.macro_f1_mean) + .01 and not source.collapse_warning:
+        chosen, reason = "source_only", "surrogate UDA F1 exceeds both adaptation methods by predeclared 0.01"
+    elif (ot.macro_f1_mean >= coral.macro_f1_mean - .005 and ot.balanced_accuracy_mean >= coral.balanced_accuracy_mean - .005 and
+          ot.worst_load_f1 >= coral.worst_load_f1 - .02 and not ot.collapse_warning and ot_seed_stability >= coral_seed_stability - .03):
+        chosen, reason = "class_regularized_ot", "OT is not materially worse than CORAL on the fair surrogate benchmark and its seed stability is not worse"
+    else:
+        chosen, reason = "coral", "CORAL is materially better or more stable under the predeclared fair-benchmark rule; choose the simpler alignment"
+    return chosen, {"selected_final_method": chosen, "selection_basis": reason, "selection_thresholds": {"f1_tie": .005, "ba_tie": .005, "worst_load_f1_tie": .02, "seed_stability_tie": .03},
+                    "target_labels_used": False, "pdf_or_reference_labels_used": False}
+
+
+def geometry_for_method(source: pd.DataFrame, target: pd.DataFrame, zs: np.ndarray, zt: np.ndarray, method: str,
+                        transform: dict | None, final: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Final explanation in the exact representation used to form final predictions."""
+    aligned_source = zs if method == "source_only" else (apply_coral(zs, transform) if method == "coral" else apply_ot(zs, transform))
+    scaler = StandardScaler().fit(aligned_source, sample_weight=class_file_window_weights(source))
+    source_space, target_space = scaler.transform(aligned_source), scaler.transform(zt)
+    centers = {label: source_space[source.label.to_numpy() == label].mean(axis=0) for label in LABELS}
+    file_centers = {str(fid): source_space[np.asarray(idx)].mean(axis=0) for fid, idx in source.groupby("file_id").indices.items()}
+    final_by_file = final.set_index("file_id")
+    rows = []
+    for fid, indices in target.groupby("file_id", sort=True).indices.items():
+        point = target_space[np.asarray(indices)].mean(axis=0)
+        row = {"file_id": str(fid), "final_method": final_by_file.loc[str(fid), "final_method"],
+               "final_candidate_label": final_by_file.loc[str(fid), "candidate_label"],
+               **{f"distance_to_{label}": float(np.linalg.norm(point - centers[label])) for label in LABELS},
+               "nearest_source_class": min(centers, key=lambda label: np.linalg.norm(point - centers[label])),
+               "nearest_source_file": min(file_centers, key=lambda item: np.linalg.norm(point - file_centers[item]))}
+        row.update(final_by_file.loc[str(fid), ["probability_margin", "normalized_entropy", "encoder_agreement", "rpm_agreement", "subsample_agreement", "loto_agreement", "review_required"]].to_dict())
+        rows.append(row)
+    movement = pd.DataFrame([{"label": label, "aligned_center_norm": float(np.linalg.norm(centers[label])), "method": method} for label in LABELS])
+    return pd.DataFrame(rows), movement
+
+
+def loto_for_method(method: str, source: pd.DataFrame, target: pd.DataFrame, zs: np.ndarray, zt: np.ndarray,
+                    source_p: np.ndarray, seed: int) -> pd.DataFrame:
+    rows = []
+    for file_id, indices in target.groupby("file_id", sort=True).indices.items():
+        part = target.iloc[np.asarray(indices)]
+        if method == "source_only":
+            p = source_p[np.asarray(indices)]
+        else:
+            keep = target.file_id.to_numpy() != file_id
+            if method == "coral":
+                transform = fit_coral(zs, source, zt[keep], target.loc[keep], FORMAL_VARIANT); head = fit_head(apply_coral(zs, transform), source, seed)
+            else:
+                transform = fit_class_regularized_ot(zs, source, zt[keep], target.loc[keep]); head = fit_head(apply_ot(zs, transform), source, seed)
+            p = probabilities(head, zt[np.asarray(indices)])
+        rows.append(aggregate(part, p, f"{method}_loto"))
+    return pd.concat(rows, ignore_index=True)
+
+
+def target_stability_for_method(method: str, source: pd.DataFrame, target: pd.DataFrame, names: list[str], model: q2.SourceMLP,
+                                scaler: StandardScaler, zs: np.ndarray, zt: np.ndarray, source_p: np.ndarray) -> dict:
+    """Same 570/600/630, LOTO and subsample rules for every candidate method."""
+    p600, transform600 = _method_probabilities(method, source, target, zs, zt, source_p, 2025)
+    base = aggregate(target, p600, method).set_index("file_id")
+    loto_table = loto_for_method(method, source, target, zs, zt, source_p, 2025)
+    loto_map = loto_table.set_index("file_id").predicted_label.to_dict()
+    tables = {600: base}
+    for rpm in (570, 630):
+        _, rpm_target, _ = load_inputs(Path("outputs/q3_refined"), rpm)
+        zrpm, rpm_source_p = infer(model, scaler.transform(rpm_target[names].to_numpy(float)))
+        p, _ = _method_probabilities(method, source, rpm_target, zs, zrpm, rpm_source_p, 2025)
+        tables[rpm] = aggregate(rpm_target, p, method).set_index("file_id")
+    rpm_rows = []
+    for fid in list("ABCDEFGHIJKLMNOP"):
+        labels = [tables[rpm].loc[fid, "predicted_label"] for rpm in (570, 600, 630)]
+        conf = [tables[rpm].loc[fid, "confidence"] for rpm in (570, 600, 630)]
+        margin = [tables[rpm].loc[fid, "probability_margin"] for rpm in (570, 600, 630)]
+        rpm_rows.append({"file_id": fid, "method": method, "prediction_570": labels[0], "prediction_600": labels[1], "prediction_630": labels[2],
+                         "agreement_ratio": float(np.mean(np.asarray(labels) == labels[1])), "confidence_variation": float(np.ptp(conf)), "margin_variation": float(np.ptp(margin))})
+    rpm_table = pd.DataFrame(rpm_rows)
+    return {"probabilities": p600, "transform": transform600, "base": base.reset_index(), "loto": loto_table, "rpm": rpm_table,
+            "subsample": stability(target, p600), "rpm_mean": float(rpm_table.agreement_ratio.mean()),
+            "loto_mean": float(np.mean([base.loc[fid, "predicted_label"] == loto_map[fid] for fid in base.index]))}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/q3_refined"))
+    parser.add_argument("--data-root", type=Path, default=Path("数据集") / "数据集")
+    parser.add_argument("--epochs", type=int, default=45); parser.add_argument("--surrogate-epochs", type=int, default=30)
+    args = parser.parse_args()
+    if args.epochs < 1 or args.surrogate_epochs < 1: raise ValueError("epochs must be positive")
+    args.output_dir.mkdir(parents=True, exist_ok=True); (args.output_dir / "models").mkdir(parents=True, exist_ok=True)
+    previous = pre_fair_prediction_baseline(args.output_dir)
+    # Rebuild every v2 input after the schema correction; no old feature cache is reused.
+    v2.build(args.data_root, args.output_dir, 600, write_source=True)
+    for rpm in (570, 630): v2.build(args.data_root, args.output_dir, rpm, write_source=False)
+    source, target, names = load_inputs(args.output_dir, 600)
+    schema_audit = json.loads((args.output_dir / "transfer_v2_schema_audit.json").read_text(encoding="utf-8"))
+    ablation, ablation_schema = feature_ablation(source, names)
+    write_csv(args.output_dir / "transfer_v2_ablation.csv", ablation); write_json(args.output_dir / "transfer_v2_ablation_schema.json", ablation_schema)
+    audit_lines = ["# 固定 Hz 包络依赖审计", "", "消融只在源域文件级 LOLO Logistic 探针上完成，未读取 A–P 标签或候选结果。", "", "```csv", ablation.to_csv(index=False).strip(), "```", "", "`no_absolute_hz` 删除三段固定 Hz 包络特征；`no_envelope` 还删除不依赖固定 Hz 的全频包络描述；`no_order` 删除所有阶次描述。四组 schema 不同。", "",
+                   "固定 Hz 包络可能编码 CWRU 传感器/结构共振，因此其源域增益不能被解释为跨设备正确性。正式 Transfer-v2 暂保留 full schema，以预先固定的源域可辨识性作为工程基线；最终目标结论保持候选级，且 no_absolute_hz 是必须报告的设备依赖敏感性，而非按 A–P 结果选择。"]
+    (args.output_dir / "fixed_hz_dependency_audit.md").write_text("\n".join(audit_lines) + "\n", encoding="utf-8")
+
+    # Five source encoders: fixed seeds, no best-seed selection.
+    seed_records = {"source_only": [], "coral": [], "class_regularized_ot": []}; reference = None
+    for seed in SEEDS:
+        model, scaler = train_encoder(source, names, seed, args.epochs)
+        zs, _ = infer(model, scaler.transform(source[names].to_numpy(float)))
+        zt, source_p = infer(model, scaler.transform(target[names].to_numpy(float)))
+        for method in seed_records:
+            p, transform = _method_probabilities(method, source, target, zs, zt, source_p, seed)
+            table = aggregate(target, p, method)
+            for _, row in table.iterrows(): seed_records[method].append({"file_id": row.file_id, "seed": seed, "predicted_label": row.predicted_label, "confidence": row.confidence, "margin": row.probability_margin, "entropy": row.normalized_entropy})
+            if seed == 2025 and method == "coral": reference = (model, scaler, zs, zt, source_p, transform)
+    seed_consensus = {}
+    for method, records in seed_records.items():
+        table = pd.DataFrame(records); write_csv(args.output_dir / ("encoder_seed_predictions.csv" if method == "coral" else f"{method}_seed_predictions.csv"), table)
+        rows = []
+        for fid, part in table.groupby("file_id", sort=True):
+            vote = part.predicted_label.mode().iloc[0]
+            rows.append({"file_id": fid, "majority_label": vote, "agreement_ratio": float((part.predicted_label == vote).mean()), "mean_confidence": float(part.confidence.mean()), "mean_margin": float(part.margin.mean())})
+        seed_consensus[method] = pd.DataFrame(rows)
+        write_csv(args.output_dir / ("encoder_seed_consensus.csv" if method == "coral" else f"{method}_seed_consensus.csv"), seed_consensus[method])
+    model, scaler, zs, zt, source_p, coral_transform = reference
+    torch.save(model.encoder.state_dict(), args.output_dir / "models" / "transfer_v2_seed2025_encoder.pth"); torch.save(model.classifier.state_dict(), args.output_dir / "models" / "transfer_v2_seed2025_classifier.pth")
+
+    surrogate_predictions, surrogate_summary, surrogate_audit = surrogate_uda_benchmark(source, names, args.surrogate_epochs)
+    write_csv(args.output_dir / "surrogate_uda_predictions.csv", surrogate_predictions); write_csv(args.output_dir / "surrogate_uda_summary.csv", surrogate_summary)
+    candidate_stability = {method: target_stability_for_method(method, source, target, names, model, scaler, zs, zt, source_p)
+                           for method in ("source_only", "coral", "class_regularized_ot")}
+    stability_rows = [{"method": method, "seed_agreement_mean": float(seed_consensus[method].agreement_ratio.mean()),
+                       "rpm_agreement_mean": values["rpm_mean"], "loto_agreement_mean": values["loto_mean"],
+                       "subsample_agreement_mean": float(np.mean(list(values["subsample"].values())))}
+                      for method, values in candidate_stability.items()]
+    write_csv(args.output_dir / "method_target_stability.csv", pd.DataFrame(stability_rows))
+    selected, selection = select_final_method(surrogate_summary, float(seed_consensus["coral"].agreement_ratio.mean()), float(seed_consensus["class_regularized_ot"].agreement_ratio.mean()))
+    chosen_stability = candidate_stability[selected]
+    final_p, final_transform = chosen_stability["probabilities"], chosen_stability["transform"]
+    final_table = chosen_stability["base"].rename(columns={"predicted_label": "candidate_label"})
+    final_method_name = {"source_only": "Source-only Transfer-v2 S56", "coral": "CORAL Transfer-v2 S56 class/file-balanced", "class_regularized_ot": "Class-Regularized OT Transfer-v2 S56"}[selected]
+    final_table.insert(1, "final_method", final_method_name)
+    chosen_consensus = seed_consensus[selected].set_index("file_id")
+    final_table["encoder_agreement"] = final_table.file_id.map(chosen_consensus.agreement_ratio)
+
+    loto_table = chosen_stability["loto"]; write_csv(args.output_dir / "final_method_leave_one_target_out.csv", loto_table)
+    loto_map = loto_table.set_index("file_id").predicted_label.to_dict()
+    rpm_sensitivity = chosen_stability["rpm"].drop(columns="method"); write_csv(args.output_dir / "rpm_sensitivity.csv", rpm_sensitivity)
+    final_table["rpm_agreement"] = final_table.file_id.map(rpm_sensitivity.set_index("file_id").agreement_ratio)
+    final_table["subsample_agreement"] = final_table.file_id.map(chosen_stability["subsample"])
+    final_table["loto_agreement"] = final_table.apply(lambda row: row.candidate_label == loto_map[row.file_id], axis=1)
+    final_table["review_required"] = ((final_table.encoder_agreement < .8) | (final_table.rpm_agreement < 1.0) | (final_table.subsample_agreement < .75) | (~final_table.loto_agreement) | (final_table.probability_margin < .05) | (final_table.normalized_entropy > .8))
+    final_table["review_reason"] = final_table.apply(lambda row: ";".join(name for name, bad in (("encoder", row.encoder_agreement < .8), ("rpm", row.rpm_agreement < 1), ("subsample", row.subsample_agreement < .75), ("loto", not row.loto_agreement), ("low_margin", row.probability_margin < .05), ("high_entropy", row.normalized_entropy > .8)) if bad) or "stable", axis=1)
+    expected = np.asarray(LABELS)[final_table[[f"prob_{x}" for x in LABELS]].to_numpy().argmax(1)]
+    if not np.array_equal(expected, final_table.candidate_label.to_numpy()) or len(final_table) != 16: raise AssertionError("final output must be 16 argmax-consistent target candidates")
+    write_csv(args.output_dir / "target_predictions_final.csv", final_table)
+
+    geometry_final, geometry_movement = geometry_for_method(source, target, zs, zt, selected, final_transform, final_table)
+    write_csv(args.output_dir / "target_class_geometry_final.csv", geometry_final); write_csv(args.output_dir / "target_class_geometry.csv", geometry_final); write_csv(args.output_dir / "source_class_center_movement.csv", geometry_movement)
+    for method in ("coral", "class_regularized_ot"):
+        p, transform = _method_probabilities(method, source, target, zs, zt, source_p, 2025)
+        local = aggregate(target, p, method).rename(columns={"predicted_label": "candidate_label"}); local.insert(1, "final_method", method)
+        for column in ("encoder_agreement", "rpm_agreement", "subsample_agreement", "loto_agreement", "review_required"):
+            local[column] = final_table.set_index("file_id")[column].reindex(local.file_id).to_numpy()
+        local["probability_margin"] = local.probability_margin; local["normalized_entropy"] = local.normalized_entropy
+        geo, _ = geometry_for_method(source, target, zs, zt, method, transform, local)
+        write_csv(args.output_dir / f"target_class_geometry_{method}.csv", geo)
+
+    change_count = 0
+    if previous is not None:
+        changes = previous.merge(final_table[["file_id", "candidate_label", "encoder_agreement", "rpm_agreement", "review_required"]], on="file_id")
+        changes["changed"] = changes.before_fair_benchmark != changes.candidate_label
+        write_csv(args.output_dir / "target_label_changes_fair_benchmark.csv", changes)
+        change_count = int(changes.changed.sum())
+    metrics_rows = []
+    for method in ("source_only", "coral", "class_regularized_ot"):
+        p, transform = _method_probabilities(method, source, target, zs, zt, source_p, 2025)
+        aligned = zs if method == "source_only" else (apply_coral(zs, transform) if method == "coral" else apply_ot(zs, transform))
+        metrics_rows.append({"method": method, **old.domain_metrics(source, target, aligned, zt), **old.collapse(aggregate(target, p, method))})
+    write_csv(args.output_dir / "domain_metrics.csv", pd.DataFrame(metrics_rows))
+    # Retained only as a semantic-preservation diagnostic; not used for method selection.
+    retention = surrogate_summary.rename(columns={"macro_f1_mean": "macro_f1", "balanced_accuracy_mean": "balanced_accuracy"}).copy()
+    retention["interpretation"] = "Surrogate unlabelled-target OOF diagnostic; not the primary method-selection claim outside its fair benchmark."
+    write_csv(args.output_dir / "source_retention.csv", retention)
+    write_csv(args.output_dir / "source_retention_predictions.csv", surrogate_predictions.assign(interpretation="Fair surrogate UDA OOF prediction; labels were joined only after adaptation."))
+    verification = {"target_labels_used": False, "pdf_or_reference_labels_used": False, "duplicate_transfer_feature_removed": True,
+                    "ablation_sets_are_distinct": True, "surrogate_uda_protocol_fair": True, "surrogate_target_labels_hidden_during_adaptation": True,
+                    "final_geometry_matches_final_method": True, "final_argmax_consistent": True, "target_file_count": 16,
+                    **selection, "surrogate_uda_metrics": surrogate_summary.to_dict("records"), "method_target_stability": stability_rows, "schema_audit": schema_audit}
+    write_json(args.output_dir / "verification.json", verification)
+    old_labels = previous if previous is not None else pd.DataFrame(columns=["file_id", "before_fair_benchmark"])
+    comparison = surrogate_summary.set_index("method")
+    domain = pd.DataFrame(metrics_rows).set_index("method")
+    stability_summary = pd.DataFrame(stability_rows).set_index("method")
+    lines = ["# 第三问封版前公平验证与解释链修正", "", f"最终唯一主方法：**{final_method_name}**。{selection['selection_basis']}。该结论只使用统一 surrogate UDA、无标签稳定性和类别塌缩规则；未读取 A–P 真值或 PDF/参考答案。", "",
+             "| Method | Surrogate UDA F1 | BA | Worst-load F1 | MMD | Seed stability | RPM stability | Collapse |", "|---|---:|---:|---:|---:|---:|---:|---|"]
+    for method in ("source_only", "coral", "class_regularized_ot"):
+        seed_value = stability_summary.loc[method, "seed_agreement_mean"]; rpm_value = stability_summary.loc[method, "rpm_agreement_mean"]
+        lines.append(f"| {method} | {comparison.loc[method,'macro_f1_mean']:.4f}±{comparison.loc[method,'macro_f1_std']:.4f} | {comparison.loc[method,'balanced_accuracy_mean']:.4f} | {comparison.loc[method,'worst_load_f1']:.4f} | {domain.loc[method,'mmd_file_level']:.4f} | {seed_value:.3f} | {rpm_value:.3f} | {comparison.loc[method,'collapse_warning']} |")
+    lines += ["", "## 解释边界", "", "`target_class_geometry_final.csv` 在最终方法空间计算：CORAL 使用 CORAL 变换后的 source，OT 使用 OT affine 变换后的 source，source-only 不作对齐；target embedding 从不以标签参与变换。距离与最近类仅是模型几何证据，不是目标真值。", "", "## 固定 Hz 风险", "", "见 `fixed_hz_dependency_audit.md`。full Transfer-v2 用作预先固定的工程基线；固定 Hz 包络的设备依赖风险不能由本数据的无标签目标验证排除，因而 A–P 仍只能称候选诊断标签。", "", f"相对提交版本的 pre-fair 候选，有 {change_count}/16 个文件发生变化；逐文件表见 `target_label_changes_fair_benchmark.csv`，没有按外部答案回改。", f"A–P 中需复核：{int(final_table.review_required.sum())}/16。即使公平 benchmark 完成，也只有在稳定性复核解释充分后才能宣称第三问封版；当前不报告任何目标 accuracy/F1/recall。"]
+    (args.output_dir / "q3_refined_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_json(args.output_dir / "q3_refined_config.json", {"seeds": SEEDS, "epochs": args.epochs, "surrogate_epochs": args.surrogate_epochs, "features": names, "selected_final_method": selected, "selection_basis": selection["selection_basis"], "target_labels_used": False, "statistical_unit": "raw MAT file"})
+    print(f"Fair refined Question 3 outputs written to {args.output_dir}")
 
 
 if __name__ == "__main__":

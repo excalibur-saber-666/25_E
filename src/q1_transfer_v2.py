@@ -52,8 +52,9 @@ def _band_envelope(x: np.ndarray, lo: int, hi: int) -> np.ndarray:
 
 def feature_names() -> list[str]:
     names = ["shape_skew", "shape_kurtosis", "shape_crest", "zcr",
-             "angle_psd_entropy", "angle_psd_peak_ratio", "angle_order_entropy",
-             "angle_order_0_5_2", "angle_order_2_4", "angle_order_4_8", "angle_order_8_16"]
+             "angle_psd_peak_ratio", "angle_order_entropy",
+             "angle_order_0_5_2", "angle_order_2_4", "angle_order_4_8", "angle_order_8_16",
+             "envelope_kurtosis", "envelope_order_entropy"]
     for lo, hi in BANDS:
         prefix = f"env_{lo}_{hi}"
         names += [f"{prefix}_kurtosis", f"{prefix}_order_entropy",
@@ -75,12 +76,18 @@ def transfer_v2_feature(x: np.ndarray) -> dict[str, float]:
         "shape_kurtosis": float(stats.kurtosis(angle, fisher=False)),
         "shape_crest": float(np.max(np.abs(angle)) / max(np.sqrt(np.mean(angle ** 2)), 1e-12)),
         "zcr": float(np.mean(np.diff(np.signbit(angle)) != 0)),
-        "angle_psd_entropy": _entropy(power),
         "angle_psd_peak_ratio": float(power.max() / total),
         "angle_order_entropy": _entropy(power),
     }
     for lo, hi, name in ((.5, 2, "0_5_2"), (2, 4, "2_4"), (4, 8, "4_8"), (8, 16, "8_16")):
         out[f"angle_order_{name}"] = _relative_energy(order, power, lo, hi)
+    # These full-band envelope descriptors are deliberately separate from the
+    # fixed-Hz bands.  They make the no_absolute_hz and no_envelope ablations
+    # distinct without introducing another device-specific frequency boundary.
+    full_env = signal.resample(np.abs(signal.hilbert(z)), ANGLE_SAMPLES)
+    _, full_env_power = _order_power(full_env)
+    out["envelope_kurtosis"] = float(stats.kurtosis(full_env, fisher=False))
+    out["envelope_order_entropy"] = _entropy(full_env_power)
     for lo, hi in BANDS:
         env_angle = signal.resample(_band_envelope(x, lo, hi), ANGLE_SAMPLES)
         env_order, env_power = _order_power(env_angle)
@@ -143,6 +150,19 @@ def build(data_root: Path, output: Path, target_rpm: float = 600.0, write_source
               "angle_domain_note": "Approximate constant-speed angle-domain resampling from recording-level RPM; no tachometer or instantaneous speed trace is available.",
               "target_labels_used": False}
     (output / "transfer_v2_schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8")
+    if source is not None:
+        duplicates = []
+        values = source[feature_names()].to_numpy(float)
+        for left in range(values.shape[1]):
+            for right in range(left + 1, values.shape[1]):
+                if np.array_equal(values[:, left], values[:, right]):
+                    duplicates.append([feature_names()[left], feature_names()[right]])
+        audit = {"old_feature_count": 29, "new_feature_count": len(feature_names()),
+                 "removed_duplicate_feature": "angle_psd_entropy",
+                 "added_nonfixed_fullband_envelope_features": ["envelope_kurtosis", "envelope_order_entropy"],
+                 "duplicate_feature_pairs": duplicates, "duplicate_feature_check_passed": not duplicates,
+                 "check_domain": "source Transfer-v2 numeric feature matrix only"}
+        (output / "transfer_v2_schema_audit.json").write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
     summary = {"source_written": bool(write_source), "source_windows": int(len(source)) if source is not None else None,
                "target_windows": int(len(target)), "source_files": int(source.file_id.nunique()) if source is not None else None,
                "target_files": int(target.file_id.nunique()), "target_nominal_rpm": target_rpm,

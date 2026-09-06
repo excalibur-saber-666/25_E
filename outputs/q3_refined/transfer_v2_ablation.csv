@@ -1,5 +1,5 @@
 ﻿ablation,feature_count,macro_f1,balanced_accuracy,evaluation
-full,29,0.873015873015873,0.9017857142857143,source file-level LOLO logistic probe only
-no_absolute_hz,11,0.6121678743961352,0.6547619047619047,source file-level LOLO logistic probe only
-no_order,9,0.6555555555555556,0.6845238095238095,source file-level LOLO logistic probe only
-no_envelope,11,0.6121678743961352,0.6547619047619047,source file-level LOLO logistic probe only
+full,30,0.873015873015873,0.9017857142857143,source file-level LOLO logistic probe only
+no_absolute_hz,12,0.7473544973544974,0.7797619047619048,source file-level LOLO logistic probe only
+no_envelope,10,0.6382095410628019,0.6845238095238095,source file-level LOLO logistic probe only
+no_order,9,0.6897368421052632,0.7142857142857143,source file-level LOLO logistic probe only

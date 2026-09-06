@@ -1,5 +1,5 @@
-﻿label,center_movement_l2
-N,4.945262329286261
-B,4.702280377908211
-IR,3.389407963262065
-OR,2.8988866010504286
+﻿label,aligned_center_norm,method
+N,5.589123249053955,source_only
+B,5.597246170043945,source_only
+IR,5.490540504455566,source_only
+OR,5.612514019012451,source_only
