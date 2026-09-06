@@ -1,5 +1,0 @@
-﻿method,domain_balanced_accuracy,proxy_a_distance,unit,n_source_files,n_target_files,mmd_file_level
-source_mlp,0.9553571428571428,1.8214285714285712,file embedding mean+std,56,16,0.5334323048591614
-source_linear,0.9553571428571428,1.8214285714285712,file embedding mean+std,56,16,0.5334323048591614
-coral,0.9375,1.75,file embedding mean+std,56,16,0.1071135042940824
-dann,0.9508928571428572,1.8035714285714288,file embedding mean+std,56,16,0.27069082856178284

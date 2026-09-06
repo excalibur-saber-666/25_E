@@ -1,8 +1,0 @@
-{
-  "coral_minus_source_linear_macro_f1": -0.04585470085470089,
-  "coral_minus_source_mlp_macro_f1": -0.04585470085470089,
-  "negative_transfer_flag": false,
-  "threshold": -0.05,
-  "evaluation_unit": "held-out source raw MAT file",
-  "target_labels_used": false
-}

@@ -1,9 +1,7 @@
 # 第一问总结
 
-审计 MAT 文件：177。正式源域：48 kHz DE 全部故障文件加 48 kHz Normal，共 56 个文件；类别计数：{'B': 12, 'IR': 12, 'N': 4, 'OR': 28}。
+第一问已封版。正式源域由 48 kHz DE 故障文件和 48 kHz Normal 文件组成，正式特征为 Diagnostic26。
 
-正式特征使用 48→32 kHz 抗混叠重采样、16384 点窗口和 8192 点步长。描述性相关性筛选保留 28 个特征；默认 Diagnostic 特征为 26 维，Transfer 特征为 20 维。
+所有 LOLO 以原始 MAT 文件为独立样本；窗口只用于文件内特征提取，不构成独立测试样本。结果只说明源域跨载荷诊断价值，不代表无标签目标域的准确率。
 
-已完成文件级 LOLO、特征消融、窗口敏感性和目标域同构 Transfer 特征输出。所有 LOLO 以原始 MAT 文件为独立样本；该结果只说明源域跨载荷诊断价值，不能构成 A-P 目标域准确率证据。
-
-窗口敏感性结果保存在 `validation/window_sensitivity.csv`，共 6 条模型-窗口记录。第一问不包含 A-P 分类、CORAL 或 DANN 结论。
+第一问不包含目标文件分类或旧迁移路线；第二问只读取 `features_source_diagnostic.csv`、`source_metadata.csv` 和 `feature_names_diagnostic.json`。

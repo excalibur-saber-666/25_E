@@ -1,4 +1,0 @@
-﻿method,domain_balanced_accuracy,proxy_a_distance,unit,n_source_files,n_target_files,mmd_file_level,class_count,max_class_fraction,effective_class_count,collapse_warning
-source_only,0.8705357142857143,1.4821428571428572,file embedding mean+std,56,16,0.3013140857219696,"{'N': 0, 'B': 0, 'IR': 8, 'OR': 8}",0.5,2.0,False
-coral,0.8080357142857143,1.2321428571428572,file embedding mean+std,56,16,0.09667726768829765,"{'N': 3, 'B': 2, 'IR': 7, 'OR': 4}",0.4375,3.604006848712048,False
-class_regularized_ot,0.9285714285714286,1.7142857142857144,file embedding mean+std,56,16,0.09907336368559287,"{'N': 3, 'B': 2, 'IR': 7, 'OR': 4}",0.4375,3.604006848712048,False

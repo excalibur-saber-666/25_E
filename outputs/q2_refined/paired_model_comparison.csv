@@ -1,5 +1,0 @@
-﻿comparison,metric,estimate,ci_low,ci_high,includes_zero,n_files,seeds
-mlp - logistic_regression,macro_f1,0.05913960454277578,-0.01647731821888094,0.1385506005605776,True,56,5
-mlp - logistic_regression,balanced_accuracy,0.04166666666666641,-0.016666666666666722,0.10952380952380947,True,56,5
-mlp - random_forest,macro_f1,0.009444341582541371,-0.058047766446388774,0.07687004676797168,True,56,5
-mlp - random_forest,balanced_accuracy,0.01726190476190448,-0.04880952380952353,0.08513392857142842,True,56,5
