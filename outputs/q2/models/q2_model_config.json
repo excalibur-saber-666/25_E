@@ -1,0 +1,21 @@
+{
+  "random_seed": 2025,
+  "input_dim": 26,
+  "encoder": [
+    128,
+    64,
+    32
+  ],
+  "classifier": 4,
+  "activation": "GELU",
+  "normalization": "LayerNorm",
+  "label_order": [
+    "N",
+    "B",
+    "IR",
+    "OR"
+  ],
+  "dropout": 0.05,
+  "weight_decay": 0.0001,
+  "purpose": "Source-domain MLP; encoder is an initialization candidate for a future Q3 rebuild."
+}

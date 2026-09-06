@@ -1,0 +1,22 @@
+{
+  "formal_method": "Q2 frozen MLP encoder + POT SinkhornLpl1Transport",
+  "pot_used": true,
+  "custom_sinkhorn_used": false,
+  "target_labels_used": false,
+  "pdf_reference_used_for_training": false,
+  "q2_encoder_frozen": true,
+  "diagnostic26_schema_match": true,
+  "formal_target_rpm": 600,
+  "formal_reg_e": 0.1,
+  "formal_reg_cl": 1.0,
+  "formal_pot_max_iter": 10,
+  "formal_pot_max_inner_iter": 20000,
+  "formal_pot_tol": 1e-05,
+  "target_file_count": 16,
+  "finite_transport": true,
+  "formal_pot_convergence_warning_count": 0,
+  "formal_pot_converged": true,
+  "final_argmax_consistent": true,
+  "source_file_count": 56,
+  "source_target_file_overlap": 0
+}

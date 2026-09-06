@@ -228,13 +228,13 @@ def evaluate_scheme(scheme: str, files: pd.DataFrame, windows: pd.DataFrame, fea
 def refit_and_save(windows: pd.DataFrame, features: list[str], lolo: pd.DataFrame, output: Path) -> dict:
     model_dir = output / "models"; model_dir.mkdir(parents=True, exist_ok=True)
     params = json.loads(lolo.best_params.mode().iloc[0]); epochs = int(params.pop("epochs"))
-    model, scaler, _, _ = train_mlp(windows, None, features, params, SEED + 900, epochs, epochs)
+    model, scaler, _, _ = train_mlp(windows, None, features, params, SEED, epochs, epochs)
     torch.save(model.encoder.state_dict(), model_dir / "q2_mlp_encoder.pth")
     torch.save(model.classifier.state_dict(), model_dir / "q2_mlp_classifier.pth")
     torch.save(model.state_dict(), model_dir / "q2_mlp_full.pth")
     joblib.dump(scaler, model_dir / "q2_mlp_scaler.pkl")
     (model_dir / "q2_feature_names.json").write_text(json.dumps({"features": features, "n_features": len(features)}, ensure_ascii=False, indent=2), encoding="utf-8")
-    config = {"input_dim": len(features), "encoder": [128, 64, 32], "classifier": 4, "activation": "GELU", "normalization": "LayerNorm", "label_order": list(LABELS), **params, "purpose": "Source-domain MLP; encoder is an initialization candidate for a future Q3 rebuild."}
+    config = {"random_seed": SEED, "input_dim": len(features), "encoder": [128, 64, 32], "classifier": 4, "activation": "GELU", "normalization": "LayerNorm", "label_order": list(LABELS), **params, "purpose": "Source-domain MLP; encoder is an initialization candidate for a future Q3 rebuild."}
     (model_dir / "q2_model_config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     return config
 

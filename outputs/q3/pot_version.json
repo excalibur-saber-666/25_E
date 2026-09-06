@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/PythonOT/POT",
+  "install_source": "PyPI",
+  "version": "0.9.7.post1",
+  "formal_class": "ot.da.SinkhornLpl1Transport",
+  "reg_e": 0.1,
+  "reg_cl": 1.0,
+  "max_iter": 10,
+  "max_inner_iter": 20000,
+  "tol": 1e-05,
+  "cost_normalization": "max",
+  "numerical_setting_rationale": "At 1e-6, the formal unlabeled fit-plus-transform still warned after 20,000 inner iterations; 1e-5 with 20,000 inner iterations converged for the formal fit and the 570/600/630-rpm stability fits, with fixed reg_e/reg_cl."
+}

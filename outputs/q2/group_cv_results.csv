@@ -1,0 +1,5 @@
+﻿validation_scheme,fold,model,test_partition,n_train_files,n_test_files,file_leakage_count,best_params,training_seconds,inference_seconds,macro_f1,balanced_accuracy,accuracy,macro_precision,macro_recall,recall_N,recall_B,recall_IR,recall_OR
+group_cv,1,mlp,group_1,42,14,0,"{""dropout"": 0.1, ""weight_decay"": 0.0001, ""epochs"": 60}",1.1369125000201166,0.004169799969531596,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0
+group_cv,2,mlp,group_2,42,14,0,"{""dropout"": 0.1, ""weight_decay"": 0.001, ""epochs"": 60}",1.0667512000072747,0.004235500004142523,0.9333333333333333,0.9166666666666666,0.9285714285714286,0.96875,0.9166666666666666,1.0,1.0,0.6666666666666666,1.0
+group_cv,3,mlp,group_3,42,14,0,"{""dropout"": 0.05, ""weight_decay"": 0.001, ""epochs"": 60}",1.0751612999592908,0.003967099997680634,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0
+group_cv,4,mlp,group_4,42,14,0,"{""dropout"": 0.05, ""weight_decay"": 0.001, ""epochs"": 60}",1.114760499971453,0.0041034999885596335,0.8958333333333334,0.9285714285714286,0.8571428571428571,0.9,0.9285714285714286,1.0,1.0,1.0,0.7142857142857143
